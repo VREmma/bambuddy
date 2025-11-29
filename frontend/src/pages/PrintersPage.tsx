@@ -257,20 +257,12 @@ function PrinterCard({ printer, hideIfDisconnected }: { printer: Printer; hideIf
         {/* Status */}
         {status?.connected && (
           <>
-            {/* Printer State */}
-            <div className="mb-4">
-              <p className="text-sm text-bambu-gray mb-1">Status</p>
-              <p className="text-white font-medium capitalize">
-                {status.state?.toLowerCase() || 'Idle'}
-              </p>
-            </div>
-
             {/* Current Print or Idle Placeholder */}
             <div className="mb-4 p-3 bg-bambu-dark rounded-lg">
               <div className="flex gap-3">
                 {/* Cover Image */}
                 <CoverImage
-                  url={status.state === 'RUNNING' ? status.cover_url : undefined}
+                  url={status.state === 'RUNNING' ? status.cover_url : null}
                   printName={status.state === 'RUNNING' ? (status.subtask_name || status.current_print || undefined) : undefined}
                 />
                 {/* Print Info */}
