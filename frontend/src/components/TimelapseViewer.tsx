@@ -25,6 +25,17 @@ export function TimelapseViewer({ src, title, downloadFilename, onClose }: Timel
     }
   }, [playbackRate]);
 
+  // Close on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
