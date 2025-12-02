@@ -31,7 +31,7 @@
 
     .main-layout {
       display: grid;
-      grid-template-columns: 1fr 580px;
+      grid-template-columns: 1fr 620px;
       height: 100vh;
     }
 
@@ -177,86 +177,85 @@
       display: flex;
       gap: 24px;
       margin-bottom: 16px;
-      min-height: 220px;
-      align-items: flex-start;
+      min-height: 300px;
+      align-items: stretch;
     }
 
     /* Temperature Column */
     .temp-column {
       flex: 0 0 auto;
-      min-width: 160px;
+      min-width: 150px;
+      padding-right: 20px;
+      border-right: 1px solid var(--border-light);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-evenly;
     }
 
     .temp-row {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 5px 0;
+      gap: 6px;
     }
 
-    .temp-icon { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; }
-    .temp-icon img { width: 18px; opacity: 0.5; }
+    .temp-icon { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; }
+    .temp-icon img { width: 20px; opacity: 0.5; }
 
     .temp-badge {
       font-size: 11px;
       font-weight: 600;
       color: var(--accent);
       background: #e8f5e9;
-      padding: 2px 8px;
-      border-radius: 4px;
-      min-width: 24px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      min-width: 18px;
       text-align: center;
     }
 
     .temp-badge-spacer {
-      min-width: 24px;
-      padding: 2px 8px;
+      min-width: 30px;
     }
 
     .temp-value { font-size: 18px; font-weight: 500; }
-    .temp-target { font-size: 15px; color: var(--text-muted); }
+    .temp-target { font-size: 14px; color: var(--text-muted); }
 
     /* Air Condition */
     .air-section {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 12px 0;
-      margin-top: 10px;
-      border-top: 1px solid var(--border-light);
+      gap: 8px;
     }
 
     .air-label {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       font-size: 13px;
       color: var(--text-secondary);
     }
 
-    .air-label img { width: 18px; opacity: 0.5; }
+    .air-label img { width: 20px; opacity: 0.5; }
 
     .air-values {
       display: flex;
       align-items: center;
       gap: 16px;
-      margin-top: 8px;
     }
 
     .air-value {
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
       font-size: 13px;
       color: var(--text-secondary);
     }
 
-    .air-value img { width: 16px; opacity: 0.5; }
+    .air-value img { width: 18px; opacity: 0.5; }
 
     .lamp-section {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       font-size: 13px;
       color: var(--text-secondary);
     }
@@ -267,8 +266,9 @@
     .movement-column {
       flex: 1;
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
+      gap: 24px;
+      align-items: center;
+      justify-content: center;
     }
 
     .jog-section {
@@ -283,14 +283,13 @@
       border-radius: 6px;
       overflow: hidden;
       border: 1px solid var(--border);
-      margin-bottom: 12px;
     }
 
     .nozzle-toggle button {
-      padding: 5px 14px;
+      padding: 6px 18px;
       border: none;
       background: var(--bg-white);
-      font-size: 12px;
+      font-size: 13px;
       cursor: pointer;
       color: var(--text-secondary);
     }
@@ -298,118 +297,60 @@
     .nozzle-toggle button:first-child { border-right: 1px solid var(--border); }
     .nozzle-toggle button.active { background: var(--accent); color: white; }
 
-    .movement-row {
-      display: flex;
-      gap: 20px;
-      align-items: stretch;
-      flex: 1;
-    }
-
     .jog-pad {
       position: relative;
-      width: 130px;
-      height: 130px;
-      margin-bottom: 12px;
+      width: 220px;
+      height: 220px;
+      margin-bottom: 14px;
     }
 
-    .jog-ring {
+    .jog-pad img {
       width: 100%;
       height: 100%;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #f8f8f8 0%, #ebebeb 100%);
-      border: 1px solid var(--border);
-      position: relative;
     }
-
-    .jog-label {
-      position: absolute;
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-
-    .jog-label.top { top: 8px; left: 50%; transform: translateX(-50%); }
-    .jog-label.bottom { bottom: 8px; left: 50%; transform: translateX(-50%); }
-    .jog-label.left { left: 8px; top: 50%; transform: translateY(-50%); }
-    .jog-label.right { right: 8px; top: 50%; transform: translateY(-50%); }
-
-    .jog-btn {
-      position: absolute;
-      width: 24px;
-      height: 24px;
-      background: var(--bg-white);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 10px;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .jog-btn:hover { background: var(--bg-hover); }
-    .jog-btn.up { top: 18px; left: 50%; transform: translateX(-50%); }
-    .jog-btn.down { bottom: 18px; left: 50%; transform: translateX(-50%); }
-    .jog-btn.left { left: 18px; top: 50%; transform: translateY(-50%); }
-    .jog-btn.right { right: 18px; top: 50%; transform: translateY(-50%); }
-
-    .jog-home {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 42px;
-      height: 42px;
-      border-radius: 50%;
-      background: var(--accent);
-      border: none;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .jog-home:hover { background: #009938; }
-    .jog-home img { width: 20px; filter: brightness(0) invert(1); }
 
     /* Bed Controls */
     .bed-controls {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
 
     .bed-btn {
-      padding: 6px 12px;
+      padding: 8px 14px;
       background: var(--bg-white);
       border: 1px solid var(--border);
       border-radius: 6px;
       cursor: pointer;
-      font-size: 12px;
+      font-size: 13px;
       color: var(--text-secondary);
     }
 
     .bed-btn:hover { background: var(--bg-hover); }
-    .bed-label { font-size: 12px; color: var(--text-muted); padding: 0 6px; }
+    .bed-label { font-size: 13px; color: var(--text-muted); padding: 0 8px; }
 
     /* Extruder Section */
     .extruder-section {
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       gap: 6px;
       flex: 1;
+      justify-content: center;
+    }
+
+    .extruder-section .nozzle-toggle {
+      margin-bottom: 4px;
     }
 
     .extruder-btn {
-      width: 32px;
-      height: 32px;
+      width: 36px;
+      height: 30px;
       background: var(--bg-white);
       border: 1px solid var(--border);
       border-radius: 6px;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 12px;
       color: var(--text-muted);
       display: flex;
       align-items: center;
@@ -419,12 +360,11 @@
     .extruder-btn:hover { background: var(--bg-hover); }
 
     .extruder-graphic {
-      height: 90px;
-      margin: 6px 0;
+      height: 120px;
     }
 
     .extruder-graphic img { height: 100%; }
-    .extruder-label { font-size: 12px; color: var(--text-muted); }
+    .extruder-label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
     /* ========== AMS SECTION ========== */
     .ams-section {
@@ -557,9 +497,9 @@
     }
 
     .slot-label img {
-      width: 9px;
-      height: 9px;
-      opacity: 0.5;
+      width: 10px;
+      height: 10px;
+      opacity: 0.7;
     }
 
     /* AMS Slots - narrow and tall */
@@ -801,9 +741,10 @@
     <!-- Left Panel - Camera -->
     <div class="left-panel">
       <div class="camera-header">
+        <div style="flex: 1;"></div>
+        <button class="icon-btn"><img class="sd-card-icon" src="icons/micro-sd.svg"></button>
         <button class="icon-btn"><img src="icons/video-camera.svg"></button>
         <button class="icon-btn"><img src="icons/webcam.svg"></button>
-        <button class="icon-btn"><img class="sd-card-icon" src="icons/micro-sd.svg"></button>
         <button class="icon-btn"><img src="icons/settings.svg"></button>
       </div>
       <div class="camera-feed">
@@ -870,8 +811,6 @@
               <span class="temp-value">23</span>
               <span class="temp-target">/0 °C</span>
             </div>
-
-            <!-- Air Condition -->
             <div class="air-section">
               <div class="air-label"><img src="icons/ventilation.svg"> Air Condition</div>
             </div>
@@ -883,41 +822,28 @@
 
           <!-- Movement Column -->
           <div class="movement-column">
-            <div class="nozzle-toggle">
-              <button class="active">Left</button>
-              <button>Right</button>
+            <div class="jog-section">
+              <div class="jog-pad">
+                <img src="icons/jogpad.svg" alt="Jog Pad">
+              </div>
+              <div class="bed-controls">
+                <button class="bed-btn">&#8593;10</button>
+                <button class="bed-btn">&#8593;1</button>
+                <span class="bed-label">Bed</span>
+                <button class="bed-btn">&#8595;1</button>
+                <button class="bed-btn">&#8595;10</button>
+              </div>
             </div>
 
-            <div class="movement-row">
-              <div class="jog-section">
-                <div class="jog-pad">
-                  <div class="jog-ring">
-                    <span class="jog-label top">Y</span>
-                    <span class="jog-label bottom">-Y</span>
-                    <span class="jog-label left">-X</span>
-                    <span class="jog-label right">X</span>
-                    <button class="jog-btn up">&#9650;</button>
-                    <button class="jog-btn down">&#9660;</button>
-                    <button class="jog-btn left">&#9664;</button>
-                    <button class="jog-btn right">&#9654;</button>
-                    <button class="jog-home"><img src="icons/home.svg"></button>
-                  </div>
-                </div>
-                <div class="bed-controls">
-                  <button class="bed-btn">&#8593;10</button>
-                  <button class="bed-btn">&#8593;1</button>
-                  <span class="bed-label">Bed</span>
-                  <button class="bed-btn">&#8595;1</button>
-                  <button class="bed-btn">&#8595;10</button>
-                </div>
+            <div class="extruder-section">
+              <div class="nozzle-toggle">
+                <button class="active">Left</button>
+                <button>Right</button>
               </div>
-
-              <div class="extruder-section">
-                <button class="extruder-btn">&#9650;</button>
-                <div class="extruder-graphic"><img src="icons/dual-extruder.png"></div>
-                <button class="extruder-btn">&#9660;</button>
-                <span class="extruder-label">Extruder</span>
-              </div>
+              <button class="extruder-btn">&#9650;</button>
+              <div class="extruder-graphic"><img src="icons/dual-extruder.png"></div>
+              <button class="extruder-btn">&#9660;</button>
+              <span class="extruder-label">Extruder</span>
             </div>
           </div>
         </div>
@@ -972,6 +898,7 @@
               <div class="ams-content">
                 <div class="ams-header">
                   <div class="ams-stat"><img src="icons/water.svg"> 18 %</div>
+                  <div class="ams-stat"><img src="icons/temperature.svg"> 24°C</div>
                   <div class="ams-stat"><span class="sun">&#9788;</span></div>
                 </div>
 
@@ -1072,6 +999,7 @@
               <div class="ams-content">
                 <div class="ams-header">
                   <div class="ams-stat"><img src="icons/water.svg"> 14 %</div>
+                  <div class="ams-stat"><img src="icons/temperature.svg"> 23°C</div>
                   <div class="ams-stat"><span class="sun">&#9788;</span></div>
                 </div>
 
