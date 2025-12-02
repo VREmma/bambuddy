@@ -19,6 +19,8 @@ from backend.app.schemas.printer import (
     PrinterResponse,
     PrinterStatus,
     HMSErrorResponse,
+    AMSUnit,
+    AMSTray,
 )
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.bambu_ftp import (
@@ -145,6 +147,42 @@ async def get_printer_status(printer_id: int, db: AsyncSession = Depends(get_db)
         for e in (state.hms_errors or [])
     ]
 
+    # Parse AMS data from raw_data
+    ams_units = []
+    vt_tray = None
+    ams_exists = False
+    raw_data = state.raw_data or {}
+
+    if "ams" in raw_data:
+        ams_exists = True
+        for ams_data in raw_data["ams"]:
+            trays = []
+            for tray_data in ams_data.get("tray", []):
+                trays.append(AMSTray(
+                    id=tray_data.get("id", 0),
+                    tray_color=tray_data.get("tray_color"),
+                    tray_type=tray_data.get("tray_type"),
+                    remain=tray_data.get("remain", 0),
+                    k=tray_data.get("k"),
+                ))
+            ams_units.append(AMSUnit(
+                id=ams_data.get("id", 0),
+                humidity=ams_data.get("humidity"),
+                temp=ams_data.get("temp"),
+                tray=trays,
+            ))
+
+    # Virtual tray (external spool holder) - comes from vt_tray in raw_data
+    if "vt_tray" in raw_data:
+        vt_data = raw_data["vt_tray"]
+        vt_tray = AMSTray(
+            id=254,  # Virtual tray ID
+            tray_color=vt_data.get("tray_color"),
+            tray_type=vt_data.get("tray_type"),
+            remain=vt_data.get("remain", 0),
+            k=vt_data.get("k"),
+        )
+
     return PrinterStatus(
         id=printer_id,
         name=printer.name,
@@ -160,6 +198,9 @@ async def get_printer_status(printer_id: int, db: AsyncSession = Depends(get_db)
         temperatures=state.temperatures,
         cover_url=cover_url,
         hms_errors=hms_errors,
+        ams=ams_units,
+        ams_exists=ams_exists,
+        vt_tray=vt_tray,
     )
 
 

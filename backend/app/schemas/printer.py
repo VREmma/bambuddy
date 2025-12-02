@@ -43,6 +43,21 @@ class HMSErrorResponse(BaseModel):
     severity: int  # 1=fatal, 2=serious, 3=common, 4=info
 
 
+class AMSTray(BaseModel):
+    id: int
+    tray_color: str | None = None
+    tray_type: str | None = None
+    remain: int = 0
+    k: float | None = None  # Pressure advance value
+
+
+class AMSUnit(BaseModel):
+    id: int
+    humidity: int | None = None
+    temp: float | None = None
+    tray: list[AMSTray] = []
+
+
 class PrinterStatus(BaseModel):
     id: int
     name: str
@@ -58,3 +73,6 @@ class PrinterStatus(BaseModel):
     temperatures: dict | None = None
     cover_url: str | None = None
     hms_errors: list[HMSErrorResponse] = []
+    ams: list[AMSUnit] = []
+    ams_exists: bool = False
+    vt_tray: AMSTray | None = None  # Virtual tray / external spool

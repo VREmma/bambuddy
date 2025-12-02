@@ -41,6 +41,21 @@ export interface HMSError {
   severity: number;  // 1=fatal, 2=serious, 3=common, 4=info
 }
 
+export interface AMSTray {
+  id: number;
+  tray_color: string | null;
+  tray_type: string | null;
+  remain: number;
+  k: number | null;  // Pressure advance value
+}
+
+export interface AMSUnit {
+  id: number;
+  humidity: number | null;
+  temp: number | null;
+  tray: AMSTray[];
+}
+
 export interface PrinterStatus {
   id: number;
   name: string;
@@ -62,6 +77,9 @@ export interface PrinterStatus {
   } | null;
   cover_url: string | null;
   hms_errors: HMSError[];
+  ams: AMSUnit[];
+  ams_exists: boolean;
+  vt_tray: AMSTray | null;  // Virtual tray / external spool
 }
 
 export interface PrinterCreate {

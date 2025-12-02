@@ -1,59 +1,16 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import type { PrinterStatus } from '../../api/client';
-import { Package, Loader2, ArrowDown, ArrowUp } from 'lucide-react';
+import type { PrinterStatus, AMSUnit } from '../../api/client';
+import { Package, Loader2, ArrowDown, ArrowUp, Droplets, Thermometer } from 'lucide-react';
 
 interface AMSPanelProps {
   printerId: number;
   status: PrinterStatus | null | undefined;
 }
 
-interface AMSTray {
-  id: number;
-  color: string;
-  type: string;
-  remain: number;
-  active: boolean;
-}
-
-interface AMSUnit {
-  id: number;
-  trays: AMSTray[];
-}
-
-// Parse AMS data from raw_data in status
-function parseAMSData(status: PrinterStatus | null | undefined): AMSUnit[] {
-  // AMS data comes from raw MQTT data
-  // This is a simplified parser - actual data structure may vary
-  const rawData = (status as { raw_data?: { ams?: unknown[] } })?.raw_data;
-  if (!rawData?.ams) return [];
-
-  try {
-    return (rawData.ams as Array<{
-      id?: number;
-      tray?: Array<{
-        id?: number;
-        tray_color?: string;
-        tray_type?: string;
-        remain?: number;
-      }>;
-    }>).map((unit) => ({
-      id: unit.id ?? 0,
-      trays: (unit.tray ?? []).map((tray) => ({
-        id: tray.id ?? 0,
-        color: tray.tray_color ?? 'FFFFFF',
-        type: tray.tray_type ?? 'Unknown',
-        remain: tray.remain ?? 0,
-        active: false, // Would need additional MQTT data to determine
-      })),
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function hexToRgb(hex: string): string {
+function hexToRgb(hex: string | null): string {
+  if (!hex) return 'rgb(128, 128, 128)';
   // Handle RRGGBBAA format
   const cleanHex = hex.replace('#', '').substring(0, 6);
   const r = parseInt(cleanHex.substring(0, 2), 16) || 128;
@@ -65,7 +22,7 @@ function hexToRgb(hex: string): string {
 export function AMSPanel({ printerId, status }: AMSPanelProps) {
   const isConnected = status?.connected ?? false;
   const isPrinting = status?.state === 'RUNNING';
-  const amsUnits = parseAMSData(status);
+  const amsUnits: AMSUnit[] = status?.ams ?? [];
 
   const [selectedTray, setSelectedTray] = useState<number | null>(null);
 
@@ -116,14 +73,28 @@ export function AMSPanel({ printerId, status }: AMSPanelProps) {
       {/* AMS Units */}
       {amsUnits.map((unit) => (
         <div key={unit.id} className="mb-4">
-          {amsUnits.length > 1 && (
-            <div className="text-xs text-bambu-gray mb-2">AMS {unit.id + 1}</div>
-          )}
+          <div className="flex items-center justify-between text-xs text-bambu-gray mb-2">
+            <span>AMS {unit.id + 1}</span>
+            <div className="flex items-center gap-3">
+              {unit.humidity !== null && (
+                <span className="flex items-center gap-1">
+                  <Droplets className="w-3 h-3" />
+                  {unit.humidity}%
+                </span>
+              )}
+              {unit.temp !== null && (
+                <span className="flex items-center gap-1">
+                  <Thermometer className="w-3 h-3" />
+                  {unit.temp}°C
+                </span>
+              )}
+            </div>
+          </div>
           <div className="grid grid-cols-4 gap-2">
-            {unit.trays.map((tray) => {
+            {unit.tray.map((tray) => {
               const globalTrayId = unit.id * 4 + tray.id;
               const isSelected = selectedTray === globalTrayId;
-              const isEmpty = tray.type === 'NONE' || !tray.type;
+              const isEmpty = !tray.tray_type || tray.tray_type === '' || tray.tray_type === 'NONE';
 
               return (
                 <button
@@ -140,7 +111,7 @@ export function AMSPanel({ printerId, status }: AMSPanelProps) {
                   <div
                     className="w-8 h-8 mx-auto rounded-full mb-1 border-2 border-bambu-dark-tertiary"
                     style={{
-                      backgroundColor: isEmpty ? '#333' : hexToRgb(tray.color),
+                      backgroundColor: isEmpty ? '#333' : hexToRgb(tray.tray_color),
                     }}
                   />
 
@@ -150,8 +121,8 @@ export function AMSPanel({ printerId, status }: AMSPanelProps) {
                   </div>
 
                   {/* Type */}
-                  <div className="text-xs text-center truncate" title={tray.type}>
-                    {isEmpty ? '--' : tray.type}
+                  <div className="text-xs text-center truncate" title={tray.tray_type ?? ''}>
+                    {isEmpty ? '--' : tray.tray_type}
                   </div>
 
                   {/* Remaining */}
@@ -167,11 +138,6 @@ export function AMSPanel({ printerId, status }: AMSPanelProps) {
                         {tray.remain}%
                       </div>
                     </div>
-                  )}
-
-                  {/* Active Indicator */}
-                  {tray.active && (
-                    <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-bambu-green animate-pulse" />
                   )}
                 </button>
               );

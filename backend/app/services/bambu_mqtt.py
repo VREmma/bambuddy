@@ -179,6 +179,17 @@ class BambuMQTTClient:
                     f"gcode_file: {print_data.get('gcode_file')}, subtask_name: {print_data.get('subtask_name')}"
                 )
 
+            # Handle AMS data that comes inside print key
+            if "ams" in print_data:
+                try:
+                    self._handle_ams_data(print_data["ams"])
+                except Exception as e:
+                    logger.error(f"[{self.serial_number}] Error handling AMS data from print: {e}")
+
+            # Handle vt_tray (virtual tray / external spool) data
+            if "vt_tray" in print_data:
+                self.state.raw_data["vt_tray"] = print_data["vt_tray"]
+
             # Check for K-profile response (extrusion_cali)
             if "command" in print_data:
                 logger.debug(f"[{self.serial_number}] Received command response: {print_data.get('command')}")
@@ -187,7 +198,7 @@ class BambuMQTTClient:
 
             self._update_state(print_data)
 
-    def _handle_ams_data(self, ams_data: list):
+    def _handle_ams_data(self, ams_data):
         """Handle AMS data changes for Spoolman integration.
 
         This is called when we receive top-level AMS data in MQTT messages.
@@ -195,15 +206,22 @@ class BambuMQTTClient:
         """
         import hashlib
 
-        # Store AMS data in raw_data so it's accessible via API
-        if "ams" not in self.state.raw_data:
-            self.state.raw_data["ams"] = ams_data
+        # Handle nested ams structure: {"ams": {"ams": [...]}} or {"ams": [...]}
+        if isinstance(ams_data, dict) and "ams" in ams_data:
+            ams_list = ams_data["ams"]
+        elif isinstance(ams_data, list):
+            ams_list = ams_data
         else:
-            self.state.raw_data["ams"] = ams_data
+            logger.warning(f"[{self.serial_number}] Unexpected AMS data format: {type(ams_data)}")
+            return
+
+        # Store AMS data in raw_data so it's accessible via API
+        self.state.raw_data["ams"] = ams_list
+        logger.debug(f"[{self.serial_number}] Stored AMS data with {len(ams_list)} units")
 
         # Create a hash of relevant AMS data to detect changes
         ams_hash_data = []
-        for ams_unit in ams_data:
+        for ams_unit in ams_list:
             for tray in ams_unit.get("tray", []):
                 # Include fields that matter for filament tracking
                 ams_hash_data.append(
@@ -217,7 +235,7 @@ class BambuMQTTClient:
             self._previous_ams_hash = ams_hash
             if self.on_ams_change:
                 logger.info(f"[{self.serial_number}] AMS data changed, triggering sync callback")
-                self.on_ams_change(ams_data)
+                self.on_ams_change(ams_list)
 
     def _update_state(self, data: dict):
         """Update printer state from message data."""
@@ -306,11 +324,14 @@ class BambuMQTTClient:
                             severity=severity if severity > 0 else 3,
                         ))
 
-        # Preserve AMS data when updating raw_data (AMS comes at top level, not in print)
+        # Preserve AMS and vt_tray data when updating raw_data
         ams_data = self.state.raw_data.get("ams")
+        vt_tray_data = self.state.raw_data.get("vt_tray")
         self.state.raw_data = data
         if ams_data is not None:
             self.state.raw_data["ams"] = ams_data
+        if vt_tray_data is not None:
+            self.state.raw_data["vt_tray"] = vt_tray_data
 
         # Log state transitions for debugging
         if "gcode_state" in data:
