@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import type { PrinterStatus, AMSUnit, AMSTray } from '../../api/client';
+import type { PrinterStatus, AMSUnit, AMSTray, KProfile } from '../../api/client';
 import { Loader2, ChevronDown, ChevronUp, RotateCw } from 'lucide-react';
 import { AMSHumidityModal } from './AMSHumidityModal';
 import { AMSMaterialsModal } from './AMSMaterialsModal';
@@ -41,6 +41,84 @@ function isLightColor(hex: string | null): boolean {
   const luminance = (0.299 * rParsed + 0.587 * gParsed + 0.114 * bParsed) / 255;
   // Lower threshold (0.45) to ensure more colors get white text for better contrast
   return luminance > 0.45;
+}
+
+// Bambu Lab color codes from tray_id_name (e.g., "A00-Y2" -> "Sunflower Yellow")
+const BAMBU_COLOR_CODES: Record<string, string> = {
+  'Y2': 'Sunflower Yellow', 'Y0': 'Yellow', 'Y1': 'Lemon Yellow',
+  'K0': 'Black', 'W0': 'White', 'W1': 'Ivory White',
+  'R0': 'Red', 'R1': 'Scarlet Red', 'R2': 'Magenta',
+  'B0': 'Blue', 'B1': 'Navy Blue', 'B2': 'Sky Blue', 'B3': 'Cyan',
+  'G0': 'Green', 'G1': 'Grass Green', 'G2': 'Jade Green',
+  'O0': 'Orange', 'O1': 'Mandarin Orange',
+  'P0': 'Purple', 'P1': 'Pink', 'P2': 'Sakura Pink',
+  'N0': 'Gray', 'N1': 'Silver Gray', 'N2': 'Charcoal',
+  'D0': 'Brown', 'D1': 'Chocolate',
+  'T0': 'Titan Gray', 'T1': 'Jade White',
+};
+
+function getColorNameFromTrayId(trayIdName: string | null): string | null {
+  if (!trayIdName) return null;
+  // tray_id_name format: "A00-Y2" or "G02-K0" - color code is after the dash
+  const parts = trayIdName.split('-');
+  if (parts.length < 2) return null;
+  const colorCode = parts[1];
+  return BAMBU_COLOR_CODES[colorCode] || null;
+}
+
+// Find best matching K-profile for a filament using cascading search
+// Priority: 1) tray_sub_brands + color, 2) tray_sub_brands only, 3) tray_type only, 4) default
+function findBestKProfile(
+  profiles: KProfile[],
+  traySubBrands: string | null,
+  trayType: string | null,
+  colorName: string | null
+): KProfile | null {
+  if (!profiles.length) return null;
+
+  const subBrands = traySubBrands?.toLowerCase() || '';
+  const type = trayType?.toUpperCase() || '';
+  const color = colorName?.toLowerCase() || '';
+
+  // Priority 1: Match tray_sub_brands AND color (e.g., "PLA Basic" + "Sunflower Yellow")
+  if (subBrands && color) {
+    const exactColorMatch = profiles.find(p => {
+      const name = p.name.toLowerCase();
+      return name.includes(subBrands) && name.includes(color);
+    });
+    if (exactColorMatch) return exactColorMatch;
+  }
+
+  // Priority 2: Match tray_sub_brands without color (e.g., "PLA Basic" in "High Flow_Bambu PLA Basic")
+  if (subBrands) {
+    const subBrandsMatch = profiles.find(p =>
+      p.name.toLowerCase().includes(subBrands)
+    );
+    if (subBrandsMatch) return subBrandsMatch;
+  }
+
+  // Priority 3: Match filament type in profile name (e.g., "PLA" in "High Flow_Bambu PLA Basic")
+  if (type) {
+    const typeMatches = profiles.filter(p =>
+      p.name.toUpperCase().includes(type)
+    );
+
+    if (typeMatches.length > 0) {
+      // Prefer "Basic" profiles for generic type matching
+      const basicMatch = typeMatches.find(p =>
+        p.name.toLowerCase().includes('basic')
+      );
+      if (basicMatch) return basicMatch;
+
+      return typeMatches[0];
+    }
+  }
+
+  // Priority 4: Default profile
+  const defaultProfile = profiles.find(p =>
+    p.name.toLowerCase() === 'default' || p.slot_id === 0
+  );
+  return defaultProfile || null;
 }
 
 // Single humidity icon that fills based on level
@@ -336,6 +414,8 @@ interface AMSPanelContentProps {
   onSlotRefresh: (amsId: number, slotId: number) => void;
   onEyeClick: (tray: AMSTray, slotLabel: string, amsId: number) => void;
   refreshingSlot: { amsId: number; trayId: number } | null;
+  getKValue: (tray: AMSTray) => number | null;
+  kProfilesLoaded: boolean;
 }
 
 // Panel content - NO wiring, just slots and info
@@ -374,6 +454,8 @@ function AMSPanelContent({
   onSlotRefresh,
   onEyeClick,
   refreshingSlot,
+  getKValue,
+  kProfilesLoaded,
 }: AMSPanelContentProps) {
   const selectedUnit = units[selectedAmsIndex];
   const isHT = selectedUnit ? isAmsHT(selectedUnit.id) : false;
@@ -509,11 +591,19 @@ function AMSPanelContent({
                   {/* Content overlay */}
                   <div className="relative w-full h-full flex flex-col items-center justify-end pb-[5px]">
                     <span
-                      className="text-[11px] font-semibold mb-1"
+                      className="text-[11px] font-semibold"
                       style={{ color: isLight ? '#000000' : '#ffffff' }}
                     >
                       {isEmpty ? '--' : tray.tray_type}
                     </span>
+                    {!isEmpty && kProfilesLoaded && (
+                      <span
+                        className="text-[10px] font-medium"
+                        style={{ color: isLight ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.85)' }}
+                      >
+                        K {(getKValue(tray) ?? 0.020).toFixed(3)}
+                      </span>
+                    )}
                     {!isEmpty && (
                       <button
                         onClick={(e) => {
@@ -768,6 +858,40 @@ export function AMSSectionDual({ printerId, printerModel, status, nozzleCount }:
   // This is extracted from each AMS unit's info field bit 8 in the backend
   // Note: JSON keys are always strings, so we use Record<string, number>
   const amsExtruderMap: Record<string, number> = status?.ams_extruder_map ?? {};
+
+  // Get nozzle diameter for K-profile lookup (default to 0.4)
+  const nozzleDiameter = status?.nozzles?.[0]?.nozzle_diameter || '0.4';
+
+  // Fetch K-profiles for this printer
+  const { data: kProfilesData, isFetched: kProfilesFetched } = useQuery({
+    queryKey: ['kprofiles', printerId, nozzleDiameter],
+    queryFn: () => api.getKProfiles(printerId, nozzleDiameter),
+    enabled: isConnected,
+    staleTime: 30000, // Cache for 30 seconds to avoid flicker on re-renders
+  });
+
+  // Create K-value lookup using cascading search by tray properties
+  // Priority: 1) tray_sub_brands + color, 2) tray_sub_brands only, 3) tray_type only, 4) default
+  const getKValueForSlot = (tray: AMSTray): number | null => {
+    const profiles = kProfilesData?.profiles || [];
+    if (!profiles.length) return null;
+
+    // Get color name from tray_id_name (e.g., "A00-Y2" -> "Sunflower Yellow")
+    const colorName = getColorNameFromTrayId(tray.tray_id_name || null);
+
+    // Use cascading search to find best matching K-profile
+    const matchedProfile = findBestKProfile(
+      profiles,
+      tray.tray_sub_brands || null,
+      tray.tray_type || null,
+      colorName
+    );
+
+    if (matchedProfile) {
+      return parseFloat(matchedProfile.k_value) || null;
+    }
+    return null; // No profile found for this filament
+  };
 
   // Distribute AMS units based on ams_extruder_map
   // Each AMS unit's info field tells us which extruder it's connected to:
@@ -1124,6 +1248,8 @@ export function AMSSectionDual({ printerId, printerModel, status, nozzleCount }:
           onSlotRefresh={handleSlotRefresh}
           onEyeClick={handleEyeClick}
           refreshingSlot={refreshingSlot}
+          getKValue={getKValueForSlot}
+          kProfilesLoaded={kProfilesFetched}
         />
 
         {isDualNozzle && (
@@ -1139,6 +1265,8 @@ export function AMSSectionDual({ printerId, printerModel, status, nozzleCount }:
             onSlotRefresh={handleSlotRefresh}
             onEyeClick={handleEyeClick}
             refreshingSlot={refreshingSlot}
+            getKValue={getKValueForSlot}
+            kProfilesLoaded={kProfilesFetched}
           />
         )}
       </div>
@@ -1243,6 +1371,7 @@ export function AMSSectionDual({ printerId, printerModel, status, nozzleCount }:
           printerId={printerId}
           printerModel={printerModel}
           nozzleDiameter={status?.nozzles?.[0]?.nozzle_diameter || '0.4'}
+          extruderId={amsExtruderMap[materialsModal.amsId.toString()] ?? 0}
           onClose={() => setMaterialsModal(null)}
         />
       )}

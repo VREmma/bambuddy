@@ -11,6 +11,7 @@ interface AMSMaterialsModalProps {
   printerId: number;
   printerModel: string;  // e.g., "H2D", "X1C", "P1S"
   nozzleDiameter?: string;
+  extruderId?: number;  // 0=right nozzle, 1=left nozzle (for filtering K-profiles)
   onClose: () => void;
   onConfirm?: (data: MaterialSettings) => void;
 }
@@ -170,6 +171,7 @@ export function AMSMaterialsModal({
   printerId,
   printerModel,
   nozzleDiameter = '0.4',
+  extruderId = 0,
   onClose,
   onConfirm,
 }: AMSMaterialsModalProps) {
@@ -282,7 +284,40 @@ export function AMSMaterialsModal({
   };
 
   // Find best K-profile when data loads or filament type changes
-  const profiles = kProfilesData?.profiles || [];
+  // First filter all profiles by extruder ID (for dual-nozzle printers)
+  const allProfiles = kProfilesData?.profiles || [];
+  const profiles = allProfiles.filter(p => p.extruder_id === extruderId);
+
+  // Filter profiles to show only matching ones in dropdown
+  const getMatchingProfiles = (): KProfile[] => {
+    if (!profiles.length) return [];
+
+    const subBrands = isBambuSpool
+      ? tray.tray_sub_brands?.toLowerCase()
+      : (selectedPresetName ? getCleanFilamentName(selectedPresetName).toLowerCase() : null);
+    const type = isBambuSpool
+      ? tray.tray_type?.toUpperCase()
+      : (selectedFilamentType?.toUpperCase() || tray.tray_type?.toUpperCase());
+
+    // If we have tray_sub_brands, only show profiles matching that (not generic type)
+    // For Bambu spools, also require "bambu" in the profile name to exclude third-party profiles
+    if (subBrands) {
+      const matches = profiles.filter(p => p.name.toLowerCase().includes(subBrands));
+      if (isBambuSpool) {
+        return matches.filter(p => p.name.toLowerCase().includes('bambu'));
+      }
+      return matches;
+    }
+
+    // Only fall back to type matching if no sub_brands available
+    if (type) {
+      return profiles.filter(p => p.name.toUpperCase().includes(type));
+    }
+
+    return [];
+  };
+
+  const matchingProfiles = getMatchingProfiles();
 
   // Get color name from Bambu tray_id_name (e.g., "A00-Y2" -> "Sunflower Yellow")
   const bambuColorName = getColorNameFromTrayId(tray.tray_id_name);
@@ -511,14 +546,14 @@ export function AMSMaterialsModal({
 
             {/* K Profile */}
             <div className="flex items-center gap-4 mb-3">
-              <label className="w-28 text-sm text-gray-600 dark:text-bambu-gray flex-shrink-0">K Profile</label>
+              <label className="w-28 text-sm text-gray-600 dark:text-bambu-gray flex-shrink-0">PA Profile</label>
               <select
                 value={selectedKProfile}
                 onChange={(e) => handleKProfileChange(e.target.value)}
                 className="flex-1 min-w-0 px-3 py-2 bg-gray-100 dark:bg-bambu-dark rounded-md border border-gray-300 dark:border-bambu-dark-tertiary text-gray-900 dark:text-white text-sm truncate"
               >
                 <option value="Default">Default</option>
-                {profiles.map(profile => (
+                {matchingProfiles.map(profile => (
                   <option key={profile.slot_id} value={profile.name}>
                     {profile.name} (K={parseFloat(profile.k_value).toFixed(3)})
                   </option>
