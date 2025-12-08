@@ -102,6 +102,16 @@ v∆v
   - Tracks filament usage during prints
   - Third-party spools (SpoolEase, etc.) gracefully skipped
 - **Cloud Profiles Sync** - Access your Bambu Cloud slicer presets
+  - View and manage filament, printer, and process presets
+  - **Template system** for quick preset creation:
+    - Save any preset as a reusable template
+    - Visibility control to choose which templates appear in modals
+    - Apply templates when creating or editing presets
+  - **Preset comparison/diff view**:
+    - Compare any preset against its base preset
+    - Compare any two presets of the same type side-by-side
+    - Highlights added, removed, and changed settings
+    - Searchable diff with change statistics
 - **File Manager** - Browse and manage files on your printer's SD card
 - **Re-print** - Send archived prints back to any connected printer
 - **Dark/Light Theme** - Easy on the eyes, day or night
@@ -892,6 +902,7 @@ To fix the printer's clock:
 - [x] Maintenance tracker
 - [x] Multi-language support (English, German)
 - [x] Auto updates from GitHub releases
+- [x] Cloud Profiles template system and diff view
 - [ ] Full printer control
 - [ ] Mobile-optimized UI
 - [ ] docs: readme -> wiki

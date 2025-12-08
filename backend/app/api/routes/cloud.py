@@ -4,6 +4,10 @@ Bambu Lab Cloud API Routes
 Handles authentication and profile management with Bambu Cloud.
 """
 
+import json
+from pathlib import Path
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -172,7 +176,7 @@ async def logout(db: AsyncSession = Depends(get_db)):
 
 @router.get("/settings", response_model=SlicerSettingsResponse)
 async def get_slicer_settings(
-    version: str = "01.09.00.00",
+    version: str = "02.04.00.70",
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -391,3 +395,71 @@ async def delete_setting(setting_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Authentication expired")
     except BambuCloudError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Path to field definition files
+FIELDS_DATA_DIR = Path(__file__).parent.parent.parent / "data"
+
+# Cache for field definitions (loaded once)
+_fields_cache: dict[str, dict] = {}
+
+
+def _load_fields(preset_type: str) -> dict:
+    """Load field definitions from JSON file."""
+    if preset_type in _fields_cache:
+        return _fields_cache[preset_type]
+
+    # Map API type names to file names
+    file_map = {
+        "filament": "filament_fields.json",
+        "print": "process_fields.json",
+        "process": "process_fields.json",
+        "printer": "printer_fields.json",
+    }
+
+    filename = file_map.get(preset_type)
+    if not filename:
+        raise HTTPException(status_code=400, detail=f"Unknown preset type: {preset_type}")
+
+    file_path = FIELDS_DATA_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Field definitions not found for: {preset_type}")
+
+    with open(file_path, "r") as f:
+        data = json.load(f)
+
+    _fields_cache[preset_type] = data
+    return data
+
+
+@router.get("/fields/{preset_type}")
+async def get_preset_fields(preset_type: Literal["filament", "print", "process", "printer"]):
+    """
+    Get field definitions for a preset type.
+
+    Returns a list of field definitions including:
+    - key: The setting key name
+    - label: Human-readable label
+    - type: Field type (text, number, boolean, select)
+    - category: Grouping category
+    - description: Field description
+    - options: For select fields, available options
+    - unit: Unit of measurement (if applicable)
+    - min/max/step: For number fields, validation constraints
+    """
+    data = _load_fields(preset_type)
+    return data
+
+
+@router.get("/fields")
+async def get_all_preset_fields():
+    """
+    Get all field definitions for all preset types.
+
+    Returns field definitions organized by type.
+    """
+    return {
+        "filament": _load_fields("filament"),
+        "process": _load_fields("process"),
+        "printer": _load_fields("printer"),
+    }

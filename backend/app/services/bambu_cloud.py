@@ -174,7 +174,7 @@ class BambuCloudService:
         except httpx.RequestError as e:
             raise BambuCloudError(f"Request failed: {e}")
 
-    async def get_slicer_settings(self, version: str = "01.09.00.00") -> dict:
+    async def get_slicer_settings(self, version: str = "02.04.00.70") -> dict:
         """
         Get all slicer settings (filament, printer, process presets).
 

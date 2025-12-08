@@ -316,6 +316,30 @@ export interface SlicerSettingDeleteResponse {
   message: string;
 }
 
+export interface FieldOption {
+  value: string;
+  label: string;
+}
+
+export interface FieldDefinition {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'boolean' | 'select';
+  category: string;
+  description?: string;
+  options?: FieldOption[];
+  unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
+export interface FieldDefinitionsResponse {
+  version: string;
+  description: string;
+  fields: FieldDefinition[];
+}
+
 export interface CloudDevice {
   dev_id: string;
   name: string;
@@ -1044,7 +1068,7 @@ export const api = {
     }),
   cloudLogout: () =>
     request<{ success: boolean }>('/cloud/logout', { method: 'POST' }),
-  getCloudSettings: (version = '01.09.00.00') =>
+  getCloudSettings: (version = '02.04.00.70') =>
     request<SlicerSettingsResponse>(`/cloud/settings?version=${version}`),
   getCloudSettingDetail: (settingId: string) =>
     request<SlicerSettingDetail>(`/cloud/settings/${settingId}`),
@@ -1063,6 +1087,10 @@ export const api = {
       method: 'DELETE',
     }),
   getCloudDevices: () => request<CloudDevice[]>('/cloud/devices'),
+  getCloudFields: (presetType: 'filament' | 'print' | 'process' | 'printer') =>
+    request<FieldDefinitionsResponse>(`/cloud/fields/${presetType}`),
+  getAllCloudFields: () =>
+    request<Record<string, FieldDefinitionsResponse>>('/cloud/fields'),
 
   // Smart Plugs
   getSmartPlugs: () => request<SmartPlug[]>('/smart-plugs/'),
