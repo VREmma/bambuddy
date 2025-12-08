@@ -9,11 +9,14 @@ from sqlalchemy import select
 
 from backend.app.core.database import get_db
 from backend.app.models.printer import Printer
+from backend.app.models.kprofile_note import KProfileNote as KProfileNoteModel
 from backend.app.schemas.kprofile import (
     KProfile,
     KProfileCreate,
     KProfileDelete,
     KProfilesResponse,
+    KProfileNote,
+    KProfileNoteResponse,
 )
 from backend.app.services.printer_manager import printer_manager
 
@@ -170,6 +173,64 @@ async def set_kprofile(
     return {"success": True, "message": message}
 
 
+@router.post("/batch", response_model=dict)
+async def set_kprofiles_batch(
+    printer_id: int,
+    profiles: list[KProfileCreate],
+    db: AsyncSession = Depends(get_db),
+):
+    """Create multiple K-profiles in a single command (for dual-nozzle).
+
+    This sends all profiles in one MQTT command, which is more reliable
+    for dual-nozzle printers that may not handle sequential commands well.
+
+    Args:
+        printer_id: ID of the printer
+        profiles: List of K-profiles to set
+    """
+    if not profiles:
+        raise HTTPException(400, "No profiles provided")
+
+    logger.info(f"[API] set_kprofiles_batch: printer={printer_id}, {len(profiles)} profiles")
+    for p in profiles:
+        logger.info(f"  - extruder_id={p.extruder_id}, name={p.name}, k_value={p.k_value}")
+
+    # Check printer exists
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    # Get MQTT client for printer
+    client = printer_manager.get_client(printer_id)
+    if not client or not client.state.connected:
+        raise HTTPException(400, "Printer not connected")
+
+    # Build list of profile dicts for batch command
+    profile_dicts = [
+        {
+            "filament_id": p.filament_id,
+            "name": p.name,
+            "k_value": p.k_value,
+            "nozzle_id": p.nozzle_id,
+            "extruder_id": p.extruder_id,
+            "setting_id": p.setting_id,
+            "slot_id": p.slot_id,
+        }
+        for p in profiles
+    ]
+
+    # Get nozzle_diameter from first profile (all should have same)
+    nozzle_diameter = profiles[0].nozzle_diameter
+
+    success = client.set_kprofiles_batch(profile_dicts, nozzle_diameter)
+
+    if not success:
+        raise HTTPException(500, "Failed to send K-profiles batch command")
+
+    return {"success": True, "message": f"Added {len(profiles)} K-profiles"}
+
+
 @router.delete("/", response_model=dict)
 async def delete_kprofile(
     printer_id: int,
@@ -194,6 +255,10 @@ async def delete_kprofile(
         raise HTTPException(400, "Printer not connected")
 
     # Send the delete command to printer
+    logger.info(
+        f"[API] delete_kprofile: printer={printer_id}, slot_id={profile.slot_id}, "
+        f"setting_id={profile.setting_id}, filament_id={profile.filament_id}"
+    )
     success = client.delete_kprofile(
         cali_idx=profile.slot_id,
         filament_id=profile.filament_id,
@@ -207,3 +272,115 @@ async def delete_kprofile(
         raise HTTPException(500, "Failed to send K-profile delete command")
 
     return {"success": True, "message": "K-profile deleted successfully"}
+
+
+@router.get("/notes", response_model=KProfileNoteResponse)
+async def get_kprofile_notes(
+    printer_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all K-profile notes for a printer.
+
+    Notes are stored locally since printers don't support notes.
+
+    Args:
+        printer_id: ID of the printer
+    """
+    # Check printer exists
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    # Get all notes for this printer
+    result = await db.execute(
+        select(KProfileNoteModel).where(KProfileNoteModel.printer_id == printer_id)
+    )
+    notes = result.scalars().all()
+
+    # Return as a dictionary mapping setting_id -> note
+    return KProfileNoteResponse(
+        notes={note.setting_id: note.note for note in notes}
+    )
+
+
+@router.put("/notes", response_model=dict)
+async def set_kprofile_note(
+    printer_id: int,
+    note_data: KProfileNote,
+    db: AsyncSession = Depends(get_db),
+):
+    """Set or update a note for a K-profile.
+
+    Args:
+        printer_id: ID of the printer
+        note_data: The note data (setting_id and note content)
+    """
+    # Check printer exists
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    # Find existing note or create new one
+    result = await db.execute(
+        select(KProfileNoteModel).where(
+            KProfileNoteModel.printer_id == printer_id,
+            KProfileNoteModel.setting_id == note_data.setting_id,
+        )
+    )
+    existing_note = result.scalar_one_or_none()
+
+    if note_data.note.strip():
+        # Save or update note
+        if existing_note:
+            existing_note.note = note_data.note
+        else:
+            new_note = KProfileNoteModel(
+                printer_id=printer_id,
+                setting_id=note_data.setting_id,
+                note=note_data.note,
+            )
+            db.add(new_note)
+        await db.commit()
+        return {"success": True, "message": "Note saved"}
+    else:
+        # Delete note if empty
+        if existing_note:
+            await db.delete(existing_note)
+            await db.commit()
+        return {"success": True, "message": "Note deleted"}
+
+
+@router.delete("/notes/{setting_id}", response_model=dict)
+async def delete_kprofile_note(
+    printer_id: int,
+    setting_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a note for a K-profile.
+
+    Args:
+        printer_id: ID of the printer
+        setting_id: The setting_id of the K-profile
+    """
+    # Check printer exists
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    # Find and delete the note
+    result = await db.execute(
+        select(KProfileNoteModel).where(
+            KProfileNoteModel.printer_id == printer_id,
+            KProfileNoteModel.setting_id == setting_id,
+        )
+    )
+    existing_note = result.scalar_one_or_none()
+
+    if existing_note:
+        await db.delete(existing_note)
+        await db.commit()
+
+    return {"success": True, "message": "Note deleted"}

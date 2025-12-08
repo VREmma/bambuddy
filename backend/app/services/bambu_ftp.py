@@ -241,13 +241,20 @@ class BambuFTPClient:
         # Try AVBL command (available space) - some FTP servers support this
         try:
             response = self._ftp.sendcmd("AVBL")
+            logger.debug(f"AVBL response: {response}")
             # Response format: "213 <bytes available>"
             if response.startswith("213"):
                 parts = response.split()
                 if len(parts) >= 2:
                     result["free_bytes"] = int(parts[1])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"AVBL command not supported: {e}")
+            # Try STAT command as fallback
+            try:
+                response = self._ftp.sendcmd("STAT")
+                logger.debug(f"STAT response: {response}")
+            except Exception:
+                pass
 
         # Calculate used space by listing root directories
         try:

@@ -30,6 +30,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
     if item.archive:
         response.archive_name = item.archive.print_name or item.archive.filename
         response.archive_thumbnail = item.archive.thumbnail_path
+        response.print_time_seconds = item.archive.print_time_seconds
     if item.printer:
         response.printer_name = item.printer.name
     return response

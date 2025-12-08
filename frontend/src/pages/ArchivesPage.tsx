@@ -1088,16 +1088,17 @@ export function ArchivesPage() {
       {/* Selection Toolbar */}
       {selectionMode && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl px-4 py-3 flex items-center gap-4">
+          <Button variant="secondary" size="sm" onClick={clearSelection}>
+            <X className="w-4 h-4" />
+            Close
+          </Button>
+          <div className="w-px h-6 bg-bambu-dark-tertiary" />
           <span className="text-white font-medium">
             {selectedIds.size} selected
           </span>
           <div className="w-px h-6 bg-bambu-dark-tertiary" />
           <Button variant="secondary" size="sm" onClick={selectAll}>
             Select All
-          </Button>
-          <Button variant="secondary" size="sm" onClick={clearSelection}>
-            <X className="w-4 h-4" />
-            Clear
           </Button>
           <div className="w-px h-6 bg-bambu-dark-tertiary" />
           <Button

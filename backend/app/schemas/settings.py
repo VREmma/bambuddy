@@ -23,6 +23,19 @@ class AppSettings(BaseModel):
     # Language
     notification_language: str = Field(default="en", description="Language for push notifications (en, de)")
 
+    # AMS threshold settings for humidity and temperature coloring
+    ams_humidity_good: int = Field(default=40, description="Humidity threshold for good (green): <= this value")
+    ams_humidity_fair: int = Field(default=60, description="Humidity threshold for fair (orange): <= this value, > is red")
+    ams_temp_good: float = Field(default=28.0, description="Temperature threshold for good (blue): <= this value")
+    ams_temp_fair: float = Field(default=35.0, description="Temperature threshold for fair (orange): <= this value, > is red")
+
+    # Date/time display format
+    date_format: str = Field(default="system", description="Date format: system, us, eu, iso")
+    time_format: str = Field(default="system", description="Time format: system, 12h, 24h")
+
+    # Default printer for operations
+    default_printer_id: int | None = Field(default=None, description="Default printer ID for uploads, reprints, etc.")
+
 
 class AppSettingsUpdate(BaseModel):
     """Schema for updating settings (all fields optional)."""
@@ -39,3 +52,10 @@ class AppSettingsUpdate(BaseModel):
     spoolman_sync_mode: str | None = None
     check_updates: bool | None = None
     notification_language: str | None = None
+    ams_humidity_good: int | None = None
+    ams_humidity_fair: int | None = None
+    ams_temp_good: float | None = None
+    ams_temp_fair: float | None = None
+    date_format: str | None = None
+    time_format: str | None = None
+    default_printer_id: int | None = None

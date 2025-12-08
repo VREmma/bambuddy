@@ -31,8 +31,11 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
   const batchTagMutation = useMutation({
     mutationFn: async () => {
       const tagsArray = Array.from(selectedTags);
-      await Promise.all(
-        selectedIds.map(async (id) => {
+      let successCount = 0;
+
+      // Process sequentially to avoid SQLite database locks
+      for (const id of selectedIds) {
+        try {
           const archive = await api.getArchive(id);
           const currentTags = archive.tags ? archive.tags.split(',').map(t => t.trim()).filter(Boolean) : [];
 
@@ -45,18 +48,22 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
             newTags = currentTags.filter(t => !selectedTags.has(t));
           }
 
-          return api.updateArchive(id, { tags: newTags.join(', ') });
-        })
-      );
-      return { count: selectedIds.length, mode, tags: tagsArray };
+          await api.updateArchive(id, { tags: newTags.join(', ') });
+          successCount++;
+        } catch (err) {
+          console.error(`Failed to update archive ${id}:`, err);
+          throw new Error(`Failed on archive ${id}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        }
+      }
+      return { count: successCount, mode, tags: tagsArray };
     },
     onSuccess: ({ count, mode, tags }) => {
       queryClient.invalidateQueries({ queryKey: ['archives'] });
       showToast(`${mode === 'add' ? 'Added' : 'Removed'} ${tags.length} tag${tags.length !== 1 ? 's' : ''} ${mode === 'add' ? 'to' : 'from'} ${count} archive${count !== 1 ? 's' : ''}`);
       onClose();
     },
-    onError: () => {
-      showToast('Failed to update tags', 'error');
+    onError: (error: Error) => {
+      showToast(error.message || 'Failed to update tags', 'error');
     },
   });
 

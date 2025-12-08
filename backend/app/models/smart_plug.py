@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Boolean, Integer, DateTime, ForeignKey, func
+from sqlalchemy import String, Boolean, Integer, Float, DateTime, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -32,6 +32,17 @@ class SmartPlug(Base):
     # Optional auth (some Tasmota configs require it)
     username: Mapped[str | None] = mapped_column(String(50), nullable=True)
     password: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Power alerts
+    power_alert_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    power_alert_high: Mapped[float | None] = mapped_column(Float, nullable=True)  # Alert when power > this (watts)
+    power_alert_low: Mapped[float | None] = mapped_column(Float, nullable=True)  # Alert when power < this (watts)
+    power_alert_last_triggered: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # Cooldown tracking
+
+    # Schedule (time-based on/off)
+    schedule_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    schedule_on_time: Mapped[str | None] = mapped_column(String(5), nullable=True)  # "HH:MM" format
+    schedule_off_time: Mapped[str | None] = mapped_column(String(5), nullable=True)  # "HH:MM" format
 
     # Status tracking
     last_state: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "ON"/"OFF"

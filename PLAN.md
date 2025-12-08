@@ -1,186 +1,247 @@
-# Notifications Feature Implementation Plan
+# Notification Templates Management System
 
 ## Overview
-Add push notifications for print events (start, complete, fail) with support for multiple notification providers.
 
-## Supported Providers (Initial Release)
-1. **CallMeBot/WhatsApp** - Free, uses HTTP API with phone number + API key
-2. **ntfy** - Self-hosted or ntfy.sh, simple HTTP POST
-3. **Pushover** - Commercial ($5 one-time), HTTP API with user key + app token
-4. **Telegram** - Free bot API, requires bot token + chat ID
-5. **Email (SMTP)** - Universal fallback
+Replace hardcoded notification messages with a flexible template system that allows users to customize notification content per event type, with provider-specific formatting support.
 
-## Database Design
+---
 
-### New Table: `notification_providers`
+## Data Model
+
+### New Table: `notification_templates`
+
 ```sql
-CREATE TABLE notification_providers (
+CREATE TABLE notification_templates (
     id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,                    -- User-defined name ("My WhatsApp")
-    provider_type TEXT NOT NULL,           -- "callmebot", "ntfy", "pushover", "telegram", "email"
-    enabled BOOLEAN DEFAULT true,
-
-    -- Provider-specific config (JSON or individual fields)
-    config TEXT NOT NULL,                  -- JSON: {"phone": "+1234", "apikey": "xxx"}
-
-    -- Event triggers (which events send notifications)
-    on_print_start BOOLEAN DEFAULT false,
-    on_print_complete BOOLEAN DEFAULT true,
-    on_print_failed BOOLEAN DEFAULT true,
-
-    -- Optional: Link to specific printer (NULL = all printers)
-    printer_id INTEGER REFERENCES printers(id) ON DELETE SET NULL,
-
-    -- Timestamps
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    event_type VARCHAR(50) NOT NULL,  -- print_start, print_complete, etc.
+    name VARCHAR(100) NOT NULL,       -- User-friendly name
+    title_template TEXT NOT NULL,     -- Template for notification title
+    body_template TEXT NOT NULL,      -- Template for notification body
+    is_default BOOLEAN DEFAULT 0,     -- System default (non-deletable)
+    created_at DATETIME,
+    updated_at DATETIME
 );
 ```
 
-### Config JSON Structure by Provider
-```python
-# CallMeBot/WhatsApp
-{"phone": "+1234567890", "apikey": "123456"}
+**Event Types:**
+- `print_start`
+- `print_complete`
+- `print_failed`
+- `print_stopped`
+- `print_progress`
+- `printer_offline`
+- `printer_error`
+- `filament_low`
+- `maintenance_due`
+- `test` (for test notifications)
 
-# ntfy
-{"server": "https://ntfy.sh", "topic": "my-printer", "auth_token": "optional"}
+---
 
-# Pushover
-{"user_key": "xxx", "app_token": "yyy", "priority": 0}
+## Template Variables
 
-# Telegram
-{"bot_token": "123:ABC", "chat_id": "12345678"}
+Variables use `{variable_name}` syntax (Python format strings).
 
-# Email (SMTP)
-{"smtp_server": "smtp.gmail.com", "smtp_port": 587, "username": "x", "password": "y", "from_email": "x@gmail.com", "to_email": "dest@example.com"}
+### Per-Event Variables:
+
+| Event | Variables |
+|-------|-----------|
+| `print_start` | `{printer}`, `{filename}`, `{estimated_time}` |
+| `print_complete` | `{printer}`, `{filename}`, `{duration}`, `{filament_grams}` |
+| `print_failed` | `{printer}`, `{filename}`, `{duration}`, `{reason}` |
+| `print_stopped` | `{printer}`, `{filename}`, `{duration}` |
+| `print_progress` | `{printer}`, `{filename}`, `{progress}`, `{remaining_time}` |
+| `printer_offline` | `{printer}` |
+| `printer_error` | `{printer}`, `{error_type}`, `{error_detail}` |
+| `filament_low` | `{printer}`, `{slot}`, `{remaining_percent}`, `{color}` |
+| `maintenance_due` | `{printer}`, `{items}` (formatted list) |
+| `test` | `{app_name}` |
+
+### Common Variables (all events):
+- `{timestamp}` - Current date/time
+- `{app_name}` - "BambuTrack"
+
+---
+
+## Default Templates
+
+Pre-seeded templates for each event (marked `is_default=True`):
+
+```
+print_start:
+  title: "Print Started"
+  body: "{printer}: {filename}\nEstimated: {estimated_time}"
+
+print_complete:
+  title: "Print Completed"
+  body: "{printer}: {filename}\nTime: {duration}\nFilament: {filament_grams}g"
+
+print_failed:
+  title: "Print Failed"
+  body: "{printer}: {filename}\nTime: {duration}\nReason: {reason}"
+
+print_stopped:
+  title: "Print Stopped"
+  body: "{printer}: {filename}\nTime: {duration}"
+
+print_progress:
+  title: "Print {progress}% Complete"
+  body: "{printer}: {filename}\nRemaining: {remaining_time}"
+
+printer_offline:
+  title: "Printer Offline"
+  body: "{printer} has disconnected"
+
+printer_error:
+  title: "Printer Error: {error_type}"
+  body: "{printer}\n{error_detail}"
+
+filament_low:
+  title: "Filament Low"
+  body: "{printer}: Slot {slot} at {remaining_percent}%"
+
+maintenance_due:
+  title: "Maintenance Due"
+  body: "{printer}:\n{items}"
+
+test:
+  title: "BambuTrack Test"
+  body: "This is a test notification. If you see this, notifications are working!"
 ```
 
-## Backend Implementation
+---
 
-### 1. Model: `backend/app/models/notification.py`
-- SQLAlchemy model for `notification_providers` table
-- Relationship to Printer (optional, nullable)
+## Provider-Specific Formatting
 
-### 2. Schema: `backend/app/schemas/notification.py`
-- `NotificationProviderBase` - Common fields
-- `NotificationProviderCreate` - For creating new providers
-- `NotificationProviderUpdate` - For partial updates
-- `NotificationProviderResponse` - API response with id/timestamps
-- `NotificationTestRequest` - For testing notifications
+The template system supports provider-specific formatting via a simple approach:
 
-### 3. Service: `backend/app/services/notification_service.py`
-Core notification dispatcher with provider implementations:
+1. **Plain text** (default) - Used for CallMeBot, ntfy, Pushover, Email
+2. **Markdown** - Automatically applied for Telegram (wrap title in `*bold*`)
 
-```python
-class NotificationService:
-    async def send_notification(self, provider: NotificationProvider, event: str, data: dict) -> bool
-    async def on_print_start(self, printer_id: int, data: dict, db: AsyncSession)
-    async def on_print_complete(self, printer_id: int, status: str, data: dict, db: AsyncSession)
+The notification service will:
+- Render the template with variables
+- Apply provider-specific formatting when sending
 
-    # Provider-specific methods
-    async def _send_callmebot(self, config: dict, message: str) -> bool
-    async def _send_ntfy(self, config: dict, title: str, message: str) -> bool
-    async def _send_pushover(self, config: dict, title: str, message: str) -> bool
-    async def _send_telegram(self, config: dict, message: str) -> bool
-    async def _send_email(self, config: dict, subject: str, body: str) -> bool
+---
+
+## Implementation Steps
+
+### Backend
+
+1. **Create model** `backend/app/models/notification_template.py`
+   - NotificationTemplate SQLAlchemy model
+
+2. **Create schemas** `backend/app/schemas/notification_template.py`
+   - NotificationTemplateCreate, Update, Response
+   - TemplateVariables (documentation of available vars per event)
+
+3. **Add migration** in `backend/app/core/database.py`
+   - Create table if not exists
+   - Seed default templates
+
+4. **Create API routes** `backend/app/api/routes/notification_templates.py`
+   - `GET /api/v1/notification-templates` - List all templates
+   - `GET /api/v1/notification-templates/{id}` - Get single template
+   - `PUT /api/v1/notification-templates/{id}` - Update template
+   - `POST /api/v1/notification-templates/{id}/reset` - Reset to default
+   - `GET /api/v1/notification-templates/variables` - List available variables per event
+   - `POST /api/v1/notification-templates/preview` - Preview template with sample data
+
+5. **Update notification service** `backend/app/services/notification_service.py`
+   - Load templates from database
+   - Render templates with variables
+   - Remove hardcoded message builders
+
+6. **Register routes** in `backend/app/main.py`
+
+### Frontend
+
+7. **Add API client methods** `frontend/src/api/client.ts`
+   - getNotificationTemplates, updateNotificationTemplate, etc.
+
+8. **Create template editor component** `frontend/src/components/NotificationTemplateEditor.tsx`
+   - Template editing UI with variable insertion buttons
+   - Live preview with sample data
+   - Reset to default button
+
+9. **Update SettingsPage** `frontend/src/pages/SettingsPage.tsx`
+   - Add "Templates" sub-section in Notifications tab
+   - List all templates with edit capability
+
+---
+
+## UI Design
+
+### Templates Section (in Settings > Notifications)
+
+```
++--------------------------------------------------+
+| Message Templates                                |
+| Customize notification messages for each event   |
++--------------------------------------------------+
+|                                                  |
+| +----------------+  +----------------+           |
+| | Print Started  |  | Print Complete |  ...     |
+| | "Print Started"|  | "Print Compl..." |        |
+| | [Edit]         |  | [Edit]         |          |
+| +----------------+  +----------------+           |
+|                                                  |
++--------------------------------------------------+
 ```
 
-### 4. Routes: `backend/app/api/routes/notifications.py`
+### Template Editor Modal
+
 ```
-GET    /notifications/              - List all providers
-POST   /notifications/              - Create provider
-GET    /notifications/{id}          - Get provider details
-PATCH  /notifications/{id}          - Update provider
-DELETE /notifications/{id}          - Delete provider
-POST   /notifications/{id}/test     - Send test notification
-POST   /notifications/test-config   - Test config before saving
-```
-
-### 5. Integration in `main.py`
-Add calls to notification service in existing event handlers:
-- `on_print_start()` - After smart_plug_manager call (line ~244)
-- `on_print_complete()` - After archive update (line ~580)
-
-## Frontend Implementation
-
-### 1. API Client: `frontend/src/api/client.ts`
-Add types and API methods for notification providers.
-
-### 2. Components
-- `NotificationProviderCard.tsx` - Display single provider with enable/disable toggle
-- `AddNotificationModal.tsx` - Modal for adding/editing providers with provider-specific forms
-
-### 3. Settings Page Integration
-Add "Notifications" section in SettingsPage.tsx (similar to Smart Plugs section):
-- List of configured providers
-- Add button
-- Per-provider enable/disable
-- Test button
-- Event toggles (start/complete/failed)
-
-## Message Templates
-
-### Print Started
-```
-🖨️ Print Started
-{printer_name}: {filename}
-Estimated time: {est_time}
++--------------------------------------------------+
+| Edit Template: Print Complete              [X]   |
++--------------------------------------------------+
+| Title:                                           |
+| [Print Completed_________________________]       |
+|                                                  |
+| Body:                                            |
+| +----------------------------------------------+ |
+| | {printer}: {filename}                        | |
+| | Time: {duration}                             | |
+| | Filament: {filament_grams}g                  | |
+| +----------------------------------------------+ |
+|                                                  |
+| Available Variables:                             |
+| [+printer] [+filename] [+duration] [+filament]   |
+|                                                  |
+| Preview:                                         |
+| +----------------------------------------------+ |
+| | Title: Print Completed                       | |
+| | Body:  Bambu X1C: Benchy.3mf                 | |
+| |        Time: 1h 23m                          | |
+| |        Filament: 15.2g                       | |
+| +----------------------------------------------+ |
+|                                                  |
+| [Reset to Default]              [Cancel] [Save]  |
++--------------------------------------------------+
 ```
 
-### Print Completed
-```
-✅ Print Completed
-{printer_name}: {filename}
-Time: {actual_time}
-Filament: {filament_used}g
-```
+---
 
-### Print Failed
-```
-❌ Print Failed
-{printer_name}: {filename}
-Status: {failure_reason}
-Progress: {progress}%
-```
+## File Changes Summary
 
-## Implementation Order
+| File | Action |
+|------|--------|
+| `backend/app/models/notification_template.py` | Create |
+| `backend/app/schemas/notification_template.py` | Create |
+| `backend/app/api/routes/notification_templates.py` | Create |
+| `backend/app/core/database.py` | Modify (add migration + seeding) |
+| `backend/app/models/__init__.py` | Modify (export new model) |
+| `backend/app/services/notification_service.py` | Modify (use templates) |
+| `backend/app/main.py` | Modify (register routes) |
+| `frontend/src/api/client.ts` | Modify (add API methods + types) |
+| `frontend/src/components/NotificationTemplateEditor.tsx` | Create |
+| `frontend/src/pages/SettingsPage.tsx` | Modify (add templates section) |
 
-### Phase 1: Backend Core
-1. Create notification model with migrations
-2. Create notification schema
-3. Create notification service with all 5 providers
-4. Create notification routes (CRUD + test)
-5. Register routes in main.py
-6. Integrate into print event handlers
+---
 
-### Phase 2: Frontend
-7. Add API types and methods
-8. Create NotificationProviderCard component
-9. Create AddNotificationModal component
-10. Add Notifications section to SettingsPage
+## Notes
 
-### Phase 3: Testing & Polish
-11. Test each provider
-12. Add error handling and logging
-13. Handle network failures gracefully (don't block print events)
-
-## Technical Notes
-
-### Async HTTP Requests
-Use `httpx` (already available) for async HTTP calls to notification APIs.
-
-### Error Handling
-- Notifications should NEVER block print events
-- Log failures but continue processing
-- Store last_error and last_success timestamps for UI feedback
-
-### Security
-- Store credentials in database (SQLite file already contains access codes)
-- Consider encryption for sensitive fields in future
-
-### Rate Limiting
-- Debounce rapid events (don't spam on quick start/stop cycles)
-- Consider per-provider rate limits
-
-## Questions for User
-None - proceeding with the 5 providers as discussed.
+- Default templates cannot be deleted, only modified and reset
+- Templates are language-agnostic (user writes in their preferred language)
+- The existing `notification_language` setting can be removed later (templates replace i18n)
+- Variables that are unavailable for an event will render as empty string
+- Template rendering uses safe formatting (missing vars don't crash)

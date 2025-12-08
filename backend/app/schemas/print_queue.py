@@ -48,6 +48,7 @@ class PrintQueueItemResponse(BaseModel):
     archive_name: str | None = None
     archive_thumbnail: str | None = None
     printer_name: str | None = None
+    print_time_seconds: int | None = None  # Estimated print time from archive
 
     class Config:
         from_attributes = True

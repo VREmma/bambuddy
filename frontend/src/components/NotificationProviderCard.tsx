@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { Bell, Trash2, Settings2, Edit2, Send, Loader2, CheckCircle, XCircle, Moon, Clock, ChevronDown, ChevronUp } from 'lucide-react';
+import { Bell, Trash2, Settings2, Edit2, Send, Loader2, CheckCircle, XCircle, Moon, Clock, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
 import { api } from '../api/client';
 import type { NotificationProvider, NotificationProviderUpdate } from '../api/client';
 import { Card, CardContent } from './Card';
@@ -19,6 +19,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   pushover: 'Pushover',
   telegram: 'Telegram',
   email: 'Email',
+  discord: 'Discord',
+  webhook: 'Webhook',
 };
 
 export function NotificationProviderCard({ provider, onEdit }: NotificationProviderCardProps) {
@@ -90,7 +92,10 @@ export function NotificationProviderCard({ provider, onEdit }: NotificationProvi
               {provider.last_success && (
                 <span className="text-xs text-bambu-green">Last sent: {new Date(provider.last_success).toLocaleDateString()}</span>
               )}
-              {provider.last_error && (
+              {/* Only show error if it's more recent than last success */}
+              {provider.last_error && provider.last_error_at && (
+                !provider.last_success || new Date(provider.last_error_at) > new Date(provider.last_success)
+              ) && (
                 <span className="text-xs text-red-400" title={provider.last_error}>Error</span>
               )}
             </div>
@@ -130,18 +135,24 @@ export function NotificationProviderCard({ provider, onEdit }: NotificationProvi
               <span className="px-2 py-0.5 bg-gray-500/20 text-gray-400 text-xs rounded">Offline</span>
             )}
             {provider.on_printer_error && (
-              <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs rounded">Error</span>
+              <span className="px-2 py-0.5 bg-rose-500/20 text-rose-400 text-xs rounded">Error</span>
             )}
             {provider.on_filament_low && (
-              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">Low Filament</span>
+              <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs rounded">Low Filament</span>
             )}
             {provider.on_maintenance_due && (
               <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded">Maintenance</span>
             )}
             {provider.quiet_hours_enabled && (
-              <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded flex items-center gap-1">
+              <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-400 text-xs rounded flex items-center gap-1">
                 <Moon className="w-3 h-3" />
                 Quiet
+              </span>
+            )}
+            {provider.daily_digest_enabled && (
+              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs rounded flex items-center gap-1">
+                <Calendar className="w-3 h-3" />
+                Digest {provider.daily_digest_time}
               </span>
             )}
           </div>
@@ -325,6 +336,33 @@ export function NotificationProviderCard({ provider, onEdit }: NotificationProvi
                       </span>
                     </div>
                     <p className="text-xs text-bambu-gray">Edit provider to change quiet hours</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Daily Digest */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-emerald-400" />
+                    <p className="text-sm text-white">Daily Digest</p>
+                  </div>
+                  <Toggle
+                    checked={provider.daily_digest_enabled}
+                    onChange={(checked) => updateMutation.mutate({ daily_digest_enabled: checked })}
+                  />
+                </div>
+
+                {provider.daily_digest_enabled && (
+                  <div className="pl-4 border-l-2 border-bambu-dark-tertiary space-y-2">
+                    <p className="text-xs text-bambu-gray">Batch notifications into a single daily summary</p>
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-bambu-gray" />
+                      <span className="text-sm text-white">
+                        Send at {formatTime(provider.daily_digest_time) || '08:00'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-bambu-gray">Edit provider to change digest time</p>
                   </div>
                 )}
               </div>

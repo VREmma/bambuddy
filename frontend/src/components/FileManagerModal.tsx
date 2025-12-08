@@ -155,9 +155,17 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
             </div>
             <div className="flex items-center gap-4">
               {/* Storage info */}
-              {storageData?.used_bytes != null && storageData.used_bytes > 0 && (
-                <div className="text-sm text-bambu-gray">
-                  Used: {formatStorageSize(storageData.used_bytes)}
+              {storageData && (storageData.used_bytes != null || storageData.free_bytes != null) && (
+                <div className="text-sm text-bambu-gray flex items-center gap-2">
+                  {storageData.used_bytes != null && (
+                    <span>Used: {formatStorageSize(storageData.used_bytes)}</span>
+                  )}
+                  {storageData.used_bytes != null && storageData.free_bytes != null && (
+                    <span className="text-bambu-dark-tertiary">|</span>
+                  )}
+                  {storageData.free_bytes != null && (
+                    <span>Free: {formatStorageSize(storageData.free_bytes)}</span>
+                  )}
                 </div>
               )}
               <button

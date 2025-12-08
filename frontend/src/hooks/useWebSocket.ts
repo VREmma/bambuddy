@@ -75,10 +75,17 @@ export function useWebSocket() {
         if (message.printer_id !== undefined) {
           queryClient.setQueryData(
             ['printerStatus', message.printer_id],
-            (old: Record<string, unknown> | undefined) => ({
-              ...old,
-              ...message.data,
-            })
+            (old: Record<string, unknown> | undefined) => {
+              const merged = {
+                ...old,
+                ...message.data,
+              };
+              // Preserve last known wifi_signal if new value is null
+              if (merged.wifi_signal == null && old?.wifi_signal != null) {
+                merged.wifi_signal = old.wifi_signal;
+              }
+              return merged;
+            }
           );
         }
         break;

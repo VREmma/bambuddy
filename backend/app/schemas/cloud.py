@@ -57,3 +57,41 @@ class CloudDevice(BaseModel):
     dev_model_name: Optional[str] = None
     dev_product_name: Optional[str] = None
     online: bool = False
+
+
+class SlicerSettingCreate(BaseModel):
+    """Request to create a new slicer preset."""
+    type: str = Field(..., description="Preset type: 'filament', 'print', or 'printer'")
+    name: str = Field(..., description="Display name for the preset")
+    base_id: str = Field(..., description="Base preset ID to inherit from")
+    version: str = Field(default="2.0.0.0", description="Version string for the preset")
+    setting: dict = Field(default_factory=dict, description="Setting key-value pairs (delta from base)")
+
+
+class SlicerSettingUpdate(BaseModel):
+    """Request to update an existing slicer preset."""
+    name: Optional[str] = Field(None, description="New display name")
+    setting: Optional[dict] = Field(None, description="Setting key-value pairs to update")
+
+
+class SlicerSettingDetail(BaseModel):
+    """Detailed slicer setting/preset response."""
+    message: Optional[str] = None
+    code: Optional[str] = None
+    error: Optional[str] = None
+    public: bool = False
+    version: Optional[str] = None
+    type: str
+    name: str
+    update_time: Optional[str] = None
+    nickname: Optional[str] = None
+    base_id: Optional[str] = None
+    setting: dict = Field(default_factory=dict)
+    filament_id: Optional[str] = None
+    setting_id: Optional[str] = None  # For response after create
+
+
+class SlicerSettingDeleteResponse(BaseModel):
+    """Response from deleting a preset."""
+    success: bool
+    message: str

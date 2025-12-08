@@ -34,13 +34,16 @@ async def get_db() -> AsyncSession:
 
 async def init_db():
     # Import models to register them with SQLAlchemy
-    from backend.app.models import printer, archive, filament, settings, smart_plug, print_queue, notification, maintenance  # noqa: F401
+    from backend.app.models import printer, archive, filament, settings, smart_plug, print_queue, notification, maintenance, kprofile_note, notification_template  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
         # Run migrations for new columns (SQLite doesn't auto-add columns)
         await run_migrations(conn)
+
+    # Seed default notification templates
+    await seed_notification_templates()
 
 
 async def run_migrations(conn):
@@ -100,3 +103,116 @@ async def run_migrations(conn):
     except Exception:
         # Column already exists
         pass
+
+    # Migration: Add location column to printers for grouping
+    try:
+        await conn.execute(text(
+            "ALTER TABLE printers ADD COLUMN location VARCHAR(100)"
+        ))
+    except Exception:
+        # Column already exists
+        pass
+
+    # Migration: Add interval_type column to maintenance_types
+    try:
+        await conn.execute(text(
+            "ALTER TABLE maintenance_types ADD COLUMN interval_type VARCHAR(20) DEFAULT 'hours'"
+        ))
+    except Exception:
+        # Column already exists
+        pass
+
+    # Migration: Add custom_interval_type column to printer_maintenance
+    try:
+        await conn.execute(text(
+            "ALTER TABLE printer_maintenance ADD COLUMN custom_interval_type VARCHAR(20)"
+        ))
+    except Exception:
+        # Column already exists
+        pass
+
+    # Migration: Add power alert columns to smart_plugs
+    try:
+        await conn.execute(text(
+            "ALTER TABLE smart_plugs ADD COLUMN power_alert_enabled BOOLEAN DEFAULT 0"
+        ))
+    except Exception:
+        pass
+    try:
+        await conn.execute(text(
+            "ALTER TABLE smart_plugs ADD COLUMN power_alert_high REAL"
+        ))
+    except Exception:
+        pass
+    try:
+        await conn.execute(text(
+            "ALTER TABLE smart_plugs ADD COLUMN power_alert_low REAL"
+        ))
+    except Exception:
+        pass
+    try:
+        await conn.execute(text(
+            "ALTER TABLE smart_plugs ADD COLUMN power_alert_last_triggered DATETIME"
+        ))
+    except Exception:
+        pass
+
+    # Migration: Add schedule columns to smart_plugs
+    try:
+        await conn.execute(text(
+            "ALTER TABLE smart_plugs ADD COLUMN schedule_enabled BOOLEAN DEFAULT 0"
+        ))
+    except Exception:
+        pass
+    try:
+        await conn.execute(text(
+            "ALTER TABLE smart_plugs ADD COLUMN schedule_on_time VARCHAR(5)"
+        ))
+    except Exception:
+        pass
+    try:
+        await conn.execute(text(
+            "ALTER TABLE smart_plugs ADD COLUMN schedule_off_time VARCHAR(5)"
+        ))
+    except Exception:
+        pass
+
+    # Migration: Add daily digest columns to notification_providers
+    try:
+        await conn.execute(text(
+            "ALTER TABLE notification_providers ADD COLUMN daily_digest_enabled BOOLEAN DEFAULT 0"
+        ))
+    except Exception:
+        pass
+    try:
+        await conn.execute(text(
+            "ALTER TABLE notification_providers ADD COLUMN daily_digest_time VARCHAR(5)"
+        ))
+    except Exception:
+        pass
+
+
+async def seed_notification_templates():
+    """Seed default notification templates if they don't exist."""
+    from sqlalchemy import select
+    from backend.app.models.notification_template import NotificationTemplate, DEFAULT_TEMPLATES
+
+    async with async_session() as session:
+        # Check if templates already exist
+        result = await session.execute(select(NotificationTemplate).limit(1))
+        if result.scalar_one_or_none() is not None:
+            # Templates already seeded
+            return
+
+        # Insert default templates
+        for template_data in DEFAULT_TEMPLATES:
+            template = NotificationTemplate(
+                event_type=template_data["event_type"],
+                name=template_data["name"],
+                title_template=template_data["title_template"],
+                body_template=template_data["body_template"],
+                is_default=True,
+            )
+            session.add(template)
+
+        await session.commit()

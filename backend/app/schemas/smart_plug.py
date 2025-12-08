@@ -15,6 +15,14 @@ class SmartPlugBase(BaseModel):
     off_temp_threshold: int = Field(default=70, ge=30, le=150)
     username: str | None = None
     password: str | None = None
+    # Power alerts
+    power_alert_enabled: bool = False
+    power_alert_high: float | None = Field(default=None, ge=0, le=5000)  # Alert when power > this (watts)
+    power_alert_low: float | None = Field(default=None, ge=0, le=5000)  # Alert when power < this (watts)
+    # Schedule
+    schedule_enabled: bool = False
+    schedule_on_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")  # HH:MM format
+    schedule_off_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")  # HH:MM format
 
 
 class SmartPlugCreate(SmartPlugBase):
@@ -33,6 +41,14 @@ class SmartPlugUpdate(BaseModel):
     off_temp_threshold: int | None = Field(default=None, ge=30, le=150)
     username: str | None = None
     password: str | None = None
+    # Power alerts
+    power_alert_enabled: bool | None = None
+    power_alert_high: float | None = Field(default=None, ge=0, le=5000)
+    power_alert_low: float | None = Field(default=None, ge=0, le=5000)
+    # Schedule
+    schedule_enabled: bool | None = None
+    schedule_on_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    schedule_off_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 class SmartPlugResponse(SmartPlugBase):
@@ -40,6 +56,7 @@ class SmartPlugResponse(SmartPlugBase):
     last_state: str | None = None
     last_checked: datetime | None = None
     auto_off_executed: bool = False  # True when auto-off was triggered after print
+    power_alert_last_triggered: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

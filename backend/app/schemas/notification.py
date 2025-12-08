@@ -43,10 +43,14 @@ class NotificationProviderBase(BaseModel):
     quiet_hours_start: str | None = Field(default=None, description="Start time in HH:MM format")
     quiet_hours_end: str | None = Field(default=None, description="End time in HH:MM format")
 
+    # Daily digest
+    daily_digest_enabled: bool = Field(default=False, description="Batch notifications into daily digest")
+    daily_digest_time: str | None = Field(default=None, description="Time to send digest in HH:MM format")
+
     # Printer filter
     printer_id: int | None = Field(default=None, description="Specific printer ID or null for all")
 
-    @field_validator("quiet_hours_start", "quiet_hours_end")
+    @field_validator("quiet_hours_start", "quiet_hours_end", "daily_digest_time")
     @classmethod
     def validate_time_format(cls, v: str | None) -> str | None:
         if v is None:
@@ -94,6 +98,10 @@ class NotificationProviderUpdate(BaseModel):
     quiet_hours_enabled: bool | None = None
     quiet_hours_start: str | None = None
     quiet_hours_end: str | None = None
+
+    # Daily digest
+    daily_digest_enabled: bool | None = None
+    daily_digest_time: str | None = None
 
     # Printer filter
     printer_id: int | None = None
@@ -168,3 +176,34 @@ class EmailConfig(BaseModel):
     from_email: str = Field(..., description="From email address")
     to_email: str = Field(..., description="Recipient email address")
     use_tls: bool = Field(default=True, description="Use TLS encryption")
+
+
+# Notification Log schemas
+class NotificationLogResponse(BaseModel):
+    """Schema for notification log API responses."""
+
+    id: int
+    provider_id: int
+    provider_name: str | None = None
+    provider_type: str | None = None
+    event_type: str
+    title: str
+    message: str
+    success: bool
+    error_message: str | None = None
+    printer_id: int | None = None
+    printer_name: str | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationLogStats(BaseModel):
+    """Statistics for notification logs."""
+
+    total: int
+    success_count: int
+    failure_count: int
+    by_event_type: dict[str, int]
+    by_provider: dict[str, int]

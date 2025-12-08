@@ -174,7 +174,7 @@ class BambuCloudService:
         except httpx.RequestError as e:
             raise BambuCloudError(f"Request failed: {e}")
 
-    async def get_slicer_settings(self, version: str = "01.09.00.00") -> dict:
+    async def get_slicer_settings(self, version: str = "02.04.00.70") -> dict:
         """
         Get all slicer settings (filament, printer, process presets).
 
@@ -216,6 +216,169 @@ class BambuCloudService:
                 return response.json()
 
             raise BambuCloudError(f"Failed to get setting detail: {response.status_code}")
+
+        except httpx.RequestError as e:
+            raise BambuCloudError(f"Request failed: {e}")
+
+    async def create_setting(self, preset_type: str, name: str, base_id: str, setting: dict, version: str = "2.0.0.0") -> dict:
+        """
+        Create a new slicer preset/setting.
+
+        Args:
+            preset_type: Type of preset - "filament", "print", or "printer"
+            name: Display name for the preset
+            base_id: Base preset ID to inherit from (e.g., "GFSA00")
+            setting: Dict of setting key-value pairs (only modified values from base)
+            version: Version string for the preset (default: "2.0.0.0")
+
+        Returns:
+            Created preset data including the new setting_id
+        """
+        if not self.is_authenticated:
+            raise BambuCloudAuthError("Not authenticated")
+
+        try:
+            # Add timestamp if not present
+            import time
+            if "updated_time" not in setting:
+                setting["updated_time"] = str(int(time.time()))
+
+            payload = {
+                "type": preset_type,
+                "name": name,
+                "version": version,
+                "base_id": base_id,
+                "setting": setting,
+            }
+
+            response = await self._client.post(
+                f"{self.base_url}/v1/iot-service/api/slicer/setting",
+                headers=self._get_headers(),
+                json=payload
+            )
+
+            data = response.json()
+
+            if response.status_code in (200, 201):
+                return data
+
+            error_msg = data.get("message") or data.get("error") or f"HTTP {response.status_code}"
+            raise BambuCloudError(f"Failed to create setting: {error_msg}")
+
+        except httpx.RequestError as e:
+            raise BambuCloudError(f"Request failed: {e}")
+
+    async def update_setting(self, setting_id: str, name: str | None = None, setting: dict | None = None) -> dict:
+        """
+        Update an existing slicer preset/setting.
+
+        Note: Bambu Cloud API doesn't support true updates. Instead, we:
+        1. Fetch the current setting metadata (type, base_id, version)
+        2. Use the provided settings as the new complete settings (NOT merged)
+        3. Delete the old setting first (to avoid name conflicts)
+        4. Create a new setting via POST
+
+        Args:
+            setting_id: ID of the preset to update
+            name: New display name (optional)
+            setting: Dict of setting key-value pairs - this REPLACES the old settings entirely
+
+        Returns:
+            Updated preset data with new setting_id
+        """
+        if not self.is_authenticated:
+            raise BambuCloudAuthError("Not authenticated")
+
+        try:
+            # Fetch current setting to get metadata (type, base_id, version)
+            current = await self.get_setting_detail(setting_id)
+            preset_type = current.get("type", "filament")
+
+            # Use provided settings directly (complete replacement, not merge)
+            # This allows the frontend to edit the full settings JSON
+            if setting is not None:
+                updated_setting = setting.copy()
+            else:
+                updated_setting = current.get("setting", {}).copy()
+
+            # Extract name from settings_id field in the JSON, or use provided name, or fall back to current
+            # The settings_id field contains the name in quotes, e.g., '"My Preset Name"'
+            settings_id_key = {
+                "filament": "filament_settings_id",
+                "print": "print_settings_id",
+                "printer": "printer_settings_id",
+            }.get(preset_type, "filament_settings_id")
+
+            settings_id_value = updated_setting.get(settings_id_key, "")
+            if settings_id_value:
+                # Remove surrounding quotes if present (e.g., '"foo"' -> 'foo')
+                updated_name = settings_id_value.strip('"')
+            elif name is not None:
+                updated_name = name
+            else:
+                updated_name = current.get("name", "Untitled")
+
+            # Update the timestamp
+            import time
+            updated_setting["updated_time"] = str(int(time.time()))
+
+            # Ensure settings_id field matches the name
+            updated_setting[settings_id_key] = f'"{updated_name}"'
+
+            # Delete the old setting FIRST to avoid name conflicts
+            await self.delete_setting(setting_id)
+
+            # Create new setting via POST
+            payload = {
+                "type": preset_type,
+                "name": updated_name,
+                "version": current.get("version", "2.0.0.0"),
+                "base_id": current.get("base_id", ""),
+                "setting": updated_setting,
+            }
+
+            response = await self._client.post(
+                f"{self.base_url}/v1/iot-service/api/slicer/setting",
+                headers=self._get_headers(),
+                json=payload
+            )
+
+            data = response.json()
+
+            if response.status_code == 200:
+                return data
+
+            error_msg = data.get("message") or data.get("error") or f"HTTP {response.status_code}"
+            raise BambuCloudError(f"Failed to update setting: {error_msg}")
+
+        except httpx.RequestError as e:
+            raise BambuCloudError(f"Request failed: {e}")
+
+    async def delete_setting(self, setting_id: str) -> dict:
+        """
+        Delete a slicer preset/setting.
+
+        Args:
+            setting_id: ID of the preset to delete
+
+        Returns:
+            Deletion confirmation
+        """
+        if not self.is_authenticated:
+            raise BambuCloudAuthError("Not authenticated")
+
+        try:
+            response = await self._client.delete(
+                f"{self.base_url}/v1/iot-service/api/slicer/setting/{setting_id}",
+                headers=self._get_headers()
+            )
+
+            if response.status_code in (200, 204):
+                return {"success": True, "message": "Setting deleted"}
+
+            data = response.json() if response.content else {}
+            error_msg = data.get("message") or data.get("error") or f"HTTP {response.status_code}"
+            raise BambuCloudError(f"Failed to delete setting: {error_msg}")
 
         except httpx.RequestError as e:
             raise BambuCloudError(f"Request failed: {e}")

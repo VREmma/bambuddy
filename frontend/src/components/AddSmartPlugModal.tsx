@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { X, Save, Loader2, Wifi, WifiOff, CheckCircle } from 'lucide-react';
+import { X, Save, Loader2, Wifi, WifiOff, CheckCircle, Bell, Clock } from 'lucide-react';
 import { api } from '../api/client';
 import type { SmartPlug, SmartPlugCreate, SmartPlugUpdate } from '../api/client';
 import { Button } from './Button';
@@ -21,6 +21,16 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
   const [printerId, setPrinterId] = useState<number | null>(plug?.printer_id || null);
   const [testResult, setTestResult] = useState<{ success: boolean; state?: string | null; device_name?: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Power alert settings
+  const [powerAlertEnabled, setPowerAlertEnabled] = useState(plug?.power_alert_enabled || false);
+  const [powerAlertHigh, setPowerAlertHigh] = useState<string>(plug?.power_alert_high?.toString() || '');
+  const [powerAlertLow, setPowerAlertLow] = useState<string>(plug?.power_alert_low?.toString() || '');
+
+  // Schedule settings
+  const [scheduleEnabled, setScheduleEnabled] = useState(plug?.schedule_enabled || false);
+  const [scheduleOnTime, setScheduleOnTime] = useState<string>(plug?.schedule_on_time || '');
+  const [scheduleOffTime, setScheduleOffTime] = useState<string>(plug?.schedule_off_time || '');
 
   // Fetch printers for linking
   const { data: printers } = useQuery({
@@ -109,6 +119,14 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
       username: username.trim() || null,
       password: password.trim() || null,
       printer_id: printerId,
+      // Power alerts
+      power_alert_enabled: powerAlertEnabled,
+      power_alert_high: powerAlertHigh ? parseFloat(powerAlertHigh) : null,
+      power_alert_low: powerAlertLow ? parseFloat(powerAlertLow) : null,
+      // Schedule
+      schedule_enabled: scheduleEnabled,
+      schedule_on_time: scheduleOnTime || null,
+      schedule_off_time: scheduleOffTime || null,
     };
 
     if (isEditing) {
@@ -264,6 +282,104 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
             <p className="text-xs text-bambu-gray mt-1">
               Linking enables automatic on/off when prints start/complete
             </p>
+          </div>
+
+          {/* Power Alerts */}
+          <div className="border-t border-bambu-dark-tertiary pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Bell className="w-4 h-4 text-bambu-green" />
+                <span className="text-white font-medium">Power Alerts</span>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={powerAlertEnabled}
+                  onChange={(e) => setPowerAlertEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
+              </label>
+            </div>
+            {powerAlertEnabled && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-bambu-gray mb-1">Alert if above (W)</label>
+                    <input
+                      type="number"
+                      value={powerAlertHigh}
+                      onChange={(e) => setPowerAlertHigh(e.target.value)}
+                      placeholder="e.g. 200"
+                      min="0"
+                      max="5000"
+                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-bambu-gray mb-1">Alert if below (W)</label>
+                    <input
+                      type="number"
+                      value={powerAlertLow}
+                      onChange={(e) => setPowerAlertLow(e.target.value)}
+                      placeholder="e.g. 10"
+                      min="0"
+                      max="5000"
+                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-bambu-gray">
+                  Get notified when power consumption crosses these thresholds. Leave empty to disable that direction.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Schedule */}
+          <div className="border-t border-bambu-dark-tertiary pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-bambu-green" />
+                <span className="text-white font-medium">Daily Schedule</span>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={scheduleEnabled}
+                  onChange={(e) => setScheduleEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
+              </label>
+            </div>
+            {scheduleEnabled && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-bambu-gray mb-1">Turn On at</label>
+                    <input
+                      type="time"
+                      value={scheduleOnTime}
+                      onChange={(e) => setScheduleOnTime(e.target.value)}
+                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-bambu-gray mb-1">Turn Off at</label>
+                    <input
+                      type="time"
+                      value={scheduleOffTime}
+                      onChange={(e) => setScheduleOffTime(e.target.value)}
+                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-bambu-gray">
+                  Automatically turn the plug on/off at these times daily. Leave empty to skip that action.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Actions */}

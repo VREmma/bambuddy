@@ -1,6 +1,8 @@
 @import "tailwindcss";
-
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* Enable class-based dark mode for Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   /* Bambu Lab brand colors - always the same */
@@ -88,4 +90,56 @@ body {
 
 .animate-slide-in {
   animation: slide-in 0.2s ease-out;
+}
+
+/* Theme-aware icon inversion - only invert in dark mode */
+.icon-theme {
+  opacity: 0.5;
+}
+
+.dark .icon-theme {
+  filter: invert(1);
+  opacity: 0.4;
+}
+
+/* Green-colored icon for active status indicators */
+.icon-green {
+  filter: invert(48%) sepia(89%) saturate(459%) hue-rotate(93deg) brightness(95%) contrast(92%);
+  opacity: 1;
+}
+
+/* Orange/red-colored icon for heating indicators */
+.icon-heating {
+  filter: invert(50%) sepia(100%) saturate(1000%) hue-rotate(360deg) brightness(100%) contrast(100%);
+  opacity: 1;
+}
+
+/* Jogpad theme styling - darken background in dark mode */
+.jogpad-theme {
+  /* Light mode - normal */
+}
+
+.dark .jogpad-theme {
+  filter: brightness(0.35) contrast(1.2);
+}
+
+/* Empty AMS slot with diagonal stripes */
+.ams-empty-slot {
+  background: repeating-linear-gradient(
+    45deg,
+    #444,
+    #444 2px,
+    #222 2px,
+    #222 4px
+  );
+}
+
+.dark .ams-empty-slot {
+  background: repeating-linear-gradient(
+    45deg,
+    #555,
+    #555 2px,
+    #333 2px,
+    #333 4px
+  );
 }

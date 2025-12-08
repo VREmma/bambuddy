@@ -37,6 +37,11 @@ function getShortcuts(navItems: NavItem[] | undefined, t: (key: string) => strin
       { keys: ['Esc'], description: 'Clear selection / blur input' },
       { keys: ['Right-click'], description: 'Context menu on cards' },
     ]},
+    { category: 'K-Profiles', items: [
+      { keys: ['R'], description: 'Refresh profiles' },
+      { keys: ['N'], description: 'New profile' },
+      { keys: ['Esc'], description: 'Exit selection mode' },
+    ]},
     { category: 'General', items: [
       { keys: ['?'], description: 'Show this help' },
     ]},

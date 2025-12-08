@@ -1,0 +1,166 @@
+"""Pydantic schemas for notification templates."""
+
+from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+
+class EventType(str, Enum):
+    """Supported notification event types."""
+
+    PRINT_START = "print_start"
+    PRINT_COMPLETE = "print_complete"
+    PRINT_FAILED = "print_failed"
+    PRINT_STOPPED = "print_stopped"
+    PRINT_PROGRESS = "print_progress"
+    PRINTER_OFFLINE = "printer_offline"
+    PRINTER_ERROR = "printer_error"
+    FILAMENT_LOW = "filament_low"
+    MAINTENANCE_DUE = "maintenance_due"
+    TEST = "test"
+
+
+# Available variables for each event type
+EVENT_VARIABLES: dict[str, list[str]] = {
+    "print_start": ["printer", "filename", "estimated_time", "timestamp", "app_name"],
+    "print_complete": ["printer", "filename", "duration", "filament_grams", "timestamp", "app_name"],
+    "print_failed": ["printer", "filename", "duration", "reason", "timestamp", "app_name"],
+    "print_stopped": ["printer", "filename", "duration", "timestamp", "app_name"],
+    "print_progress": ["printer", "filename", "progress", "remaining_time", "timestamp", "app_name"],
+    "printer_offline": ["printer", "timestamp", "app_name"],
+    "printer_error": ["printer", "error_type", "error_detail", "timestamp", "app_name"],
+    "filament_low": ["printer", "slot", "remaining_percent", "color", "timestamp", "app_name"],
+    "maintenance_due": ["printer", "items", "timestamp", "app_name"],
+    "test": ["app_name", "timestamp"],
+}
+
+# Sample data for previewing templates
+SAMPLE_DATA: dict[str, dict[str, str]] = {
+    "print_start": {
+        "printer": "Bambu X1C",
+        "filename": "Benchy.3mf",
+        "estimated_time": "1h 23m",
+        "timestamp": "2024-01-15 14:30",
+        "app_name": "BambuTrack",
+    },
+    "print_complete": {
+        "printer": "Bambu X1C",
+        "filename": "Benchy.3mf",
+        "duration": "1h 18m",
+        "filament_grams": "15.2",
+        "timestamp": "2024-01-15 15:48",
+        "app_name": "BambuTrack",
+    },
+    "print_failed": {
+        "printer": "Bambu X1C",
+        "filename": "Benchy.3mf",
+        "duration": "0h 45m",
+        "reason": "Filament runout",
+        "timestamp": "2024-01-15 15:15",
+        "app_name": "BambuTrack",
+    },
+    "print_stopped": {
+        "printer": "Bambu X1C",
+        "filename": "Benchy.3mf",
+        "duration": "0h 30m",
+        "timestamp": "2024-01-15 15:00",
+        "app_name": "BambuTrack",
+    },
+    "print_progress": {
+        "printer": "Bambu X1C",
+        "filename": "Benchy.3mf",
+        "progress": "50",
+        "remaining_time": "0h 41m",
+        "timestamp": "2024-01-15 15:00",
+        "app_name": "BambuTrack",
+    },
+    "printer_offline": {
+        "printer": "Bambu X1C",
+        "timestamp": "2024-01-15 14:30",
+        "app_name": "BambuTrack",
+    },
+    "printer_error": {
+        "printer": "Bambu X1C",
+        "error_type": "AMS Error",
+        "error_detail": "Filament slot 1 jammed",
+        "timestamp": "2024-01-15 14:30",
+        "app_name": "BambuTrack",
+    },
+    "filament_low": {
+        "printer": "Bambu X1C",
+        "slot": "1",
+        "remaining_percent": "15",
+        "color": "Black PLA",
+        "timestamp": "2024-01-15 14:30",
+        "app_name": "BambuTrack",
+    },
+    "maintenance_due": {
+        "printer": "Bambu X1C",
+        "items": "• Nozzle cleaning (OVERDUE)\n• Carbon rod lubrication (Soon)",
+        "timestamp": "2024-01-15 14:30",
+        "app_name": "BambuTrack",
+    },
+    "test": {
+        "app_name": "BambuTrack",
+        "timestamp": "2024-01-15 14:30",
+    },
+}
+
+
+class NotificationTemplateBase(BaseModel):
+    """Base schema for notification templates."""
+
+    title_template: str = Field(..., min_length=1, max_length=200)
+    body_template: str = Field(..., min_length=1, max_length=2000)
+
+
+class NotificationTemplateUpdate(BaseModel):
+    """Schema for updating a notification template."""
+
+    title_template: str | None = Field(default=None, min_length=1, max_length=200)
+    body_template: str | None = Field(default=None, min_length=1, max_length=2000)
+
+
+class NotificationTemplateResponse(NotificationTemplateBase):
+    """Schema for notification template API responses."""
+
+    id: int
+    event_type: str
+    name: str
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TemplateVariableInfo(BaseModel):
+    """Information about a template variable."""
+
+    name: str
+    description: str
+
+
+class EventVariablesResponse(BaseModel):
+    """Response for available variables per event type."""
+
+    event_type: str
+    event_name: str
+    variables: list[str]
+
+
+class TemplatePreviewRequest(BaseModel):
+    """Request to preview a template with sample data."""
+
+    event_type: str
+    title_template: str
+    body_template: str
+
+
+class TemplatePreviewResponse(BaseModel):
+    """Response with rendered template preview."""
+
+    title: str
+    body: str

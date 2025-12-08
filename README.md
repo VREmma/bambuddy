@@ -38,6 +38,8 @@ Since I only have X1C and H2D devices, I'm not able to test the application with
   - Auto power-off when print completes
   - Time-based delay (1-60 minutes)
   - Temperature-based delay (waits for nozzle to cool down)
+  - Scheduled power on/off times (daily schedule)
+  - Power consumption monitoring with alerts
 - **Print Statistics Dashboard** - Customizable dashboard with drag-and-drop widgets
   - Print success rates
   - Filament usage trends
@@ -86,8 +88,12 @@ Since I only have X1C and H2D devices, I'm not able to test the application with
   - Pushover
   - Telegram
   - Email (SMTP with TLS/SSL/plain options)
+  - Discord webhooks
+  - Generic webhooks (custom integrations)
   - Configurable event triggers (start, complete, failed, stopped, progress milestones)
   - Quiet hours to suppress notifications during sleep
+  - Daily digest mode (batch notifications into daily summary)
+  - Customizable message templates with variables
   - Per-printer filtering
 - **Spoolman Integration** - Sync AMS filament data with your Spoolman server
   - Automatic or manual sync modes
@@ -97,6 +103,16 @@ Since I only have X1C and H2D devices, I'm not able to test the application with
   - Tracks filament usage during prints
   - Third-party spools (SpoolEase, etc.) gracefully skipped
 - **Cloud Profiles Sync** - Access your Bambu Cloud slicer presets
+  - View and manage filament, printer, and process presets
+  - **Template system** for quick preset creation:
+    - Save any preset as a reusable template
+    - Visibility control to choose which templates appear in modals
+    - Apply templates when creating or editing presets
+  - **Preset comparison/diff view**:
+    - Compare any preset against its base preset
+    - Compare any two presets of the same type side-by-side
+    - Highlights added, removed, and changed settings
+    - Searchable diff with change statistics
 - **File Manager** - Browse and manage files on your printer's SD card
 - **Re-print** - Send archived prints back to any connected printer
 - **Dark/Light Theme** - Easy on the eyes, day or night
@@ -558,10 +574,37 @@ Once linked to a printer, you can configure:
 - **Time-based**: Wait a fixed number of minutes (1-60) after print completes
 - **Temperature-based**: Wait until nozzle temperature drops below threshold (default 70°C)
 
+#### Scheduled Power On/Off
+
+Set daily schedules to automatically turn plugs on or off at specific times:
+
+1. Expand the plug settings panel
+2. Enable **Scheduled On** and/or **Scheduled Off**
+3. Set the desired time for each
+
+Use cases:
+- Turn on printer at 8am to warm up before you start working
+- Turn off printer at midnight as a safety measure
+- Save energy by scheduling off during non-printing hours
+
+#### Power Monitoring & Alerts
+
+For Tasmota plugs with energy monitoring (e.g., Sonoff S31), Bambusy can alert you when power consumption exceeds a threshold:
+
+1. Enable **Power Alert** in the plug settings
+2. Set the **Power Threshold** in watts (e.g., 200W)
+3. Receive notifications when power exceeds the threshold
+
+This is useful for detecting:
+- Printer issues (unexpected high power draw)
+- Heater failures (power too low during printing)
+- Confirming the printer is actively heating/printing
+
 #### Manual Control
 
 Each plug card shows:
 - Current status (ON/OFF/Offline)
+- Current power consumption (if supported)
 - On/Off buttons for manual control
 - Expandable settings panel
 
@@ -578,6 +621,8 @@ Bambusy can send push notifications when print events occur. Notifications are u
 | **Pushover** | [Pushover](https://pushover.net/) push notifications | Pushover account + app token |
 | **Telegram** | Via Telegram Bot | Bot token from @BotFather |
 | **Email** | SMTP email | SMTP server credentials |
+| **Discord** | Discord channel webhooks | Webhook URL from Discord channel settings |
+| **Webhook** | Generic HTTP webhooks | Any URL that accepts POST requests |
 
 #### Adding a Notification Provider
 
@@ -620,6 +665,43 @@ By default, notifications are sent for all printers. To limit notifications to a
 1. Open the notification provider settings
 2. Select a printer from the **Printer** dropdown
 3. Only events from that printer will trigger notifications
+
+#### Daily Digest
+
+Instead of receiving individual notifications for each event, you can batch them into a single daily summary:
+
+1. Enable **Daily Digest** toggle on a notification provider
+2. Set the digest time (e.g., 08:00)
+3. All notifications for that provider are collected throughout the day
+4. At the scheduled time, a single summary notification is sent
+
+The digest includes counts and details of all events that occurred since the last digest.
+
+#### Customizable Message Templates
+
+Customize the content of your notification messages using templates with variables:
+
+1. Go to **Settings** > **Notifications** > **Templates** tab
+2. Click on any event type to edit its template
+3. Use the variable buttons to insert dynamic content
+4. Preview your template with sample data
+5. Click **Save** to apply changes
+
+**Available Variables by Event:**
+
+| Event | Variables |
+|-------|-----------|
+| Print Start | `{printer}`, `{filename}`, `{estimated_time}` |
+| Print Complete | `{printer}`, `{filename}`, `{duration}`, `{filament_grams}` |
+| Print Failed | `{printer}`, `{filename}`, `{duration}`, `{reason}` |
+| Print Progress | `{printer}`, `{filename}`, `{progress}`, `{remaining_time}` |
+| Printer Offline | `{printer}` |
+| Printer Error | `{printer}`, `{error_type}`, `{error_detail}` |
+| Filament Low | `{printer}`, `{slot}`, `{remaining_percent}`, `{color}` |
+
+Common variables available for all events: `{timestamp}`, `{app_name}`
+
+**Reset to Default:** Click the reset button on any template to restore the original message.
 
 ### Spoolman Integration
 
@@ -710,6 +792,18 @@ Bambusy matches AMS spools to Spoolman spools using the **tray UUID** - a unique
 2. For Gmail, use an App Password (not your regular password)
 3. Choose security mode: STARTTLS (port 587), SSL (port 465), or None (port 25)
 4. Enable/disable authentication as needed
+
+**Discord:**
+1. In your Discord server, go to channel settings > Integrations > Webhooks
+2. Click "New Webhook" and customize the name/avatar if desired
+3. Copy the webhook URL
+4. Paste the webhook URL in Bambusy
+
+**Webhook (Generic):**
+1. Enter any URL that accepts POST requests
+2. Optionally add custom headers (e.g., Authorization tokens)
+3. Bambusy sends JSON payloads with event details
+4. Useful for integrating with custom systems, Home Assistant, IFTTT, etc.
 
 ## Tech Stack
 
@@ -882,11 +976,15 @@ To fix the printer's clock:
 - [x] Print scheduling and queuing
 - [x] Automatic finish photo capture
 - [x] K-Profiles management (pressure advance)
-- [x] Push notifications (WhatsApp, ntfy, Pushover, Telegram, Email)
+- [x] Push notifications (WhatsApp, ntfy, Pushover, Telegram, Email, Discord, Webhook)
+- [x] Notification message templates
+- [x] Daily digest notifications
 - [x] Spoolman integration (filament inventory sync)
 - [x] Maintenance tracker
 - [x] Multi-language support (English, German)
+- [x] Smart plug scheduling and power alerts
 - [x] Auto updates from GitHub releases
+- [x] Cloud Profiles template system and diff view
 - [ ] Full printer control
 - [ ] Mobile-optimized UI
 - [ ] docs: readme -> wiki

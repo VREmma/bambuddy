@@ -1,7 +1,7 @@
 """API routes for smart plug management."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ from backend.app.schemas.smart_plug import (
 )
 from backend.app.services.tasmota import tasmota_service
 from backend.app.services.printer_manager import printer_manager
+from backend.app.services.notification_service import notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -211,12 +212,70 @@ async def get_plug_status(plug_id: int, db: AsyncSession = Depends(get_db)):
         if energy:
             energy_data = SmartPlugEnergy(**energy)
 
+            # Check power alerts
+            await check_power_alerts(plug, energy.get("power"), db)
+
     return SmartPlugStatus(
         state=status["state"],
         reachable=status["reachable"],
         device_name=status.get("device_name"),
         energy=energy_data,
     )
+
+
+async def check_power_alerts(plug: SmartPlug, current_power: float | None, db: AsyncSession):
+    """Check if power crosses alert thresholds and send notifications."""
+    if not plug.power_alert_enabled or current_power is None:
+        return
+
+    # Cooldown: don't alert more than once per 5 minutes
+    cooldown_minutes = 5
+    if plug.power_alert_last_triggered:
+        time_since_last = datetime.utcnow() - plug.power_alert_last_triggered
+        if time_since_last < timedelta(minutes=cooldown_minutes):
+            return
+
+    alert_triggered = False
+    alert_type = None
+    threshold = None
+
+    # Check high threshold
+    if plug.power_alert_high is not None and current_power > plug.power_alert_high:
+        alert_triggered = True
+        alert_type = "high"
+        threshold = plug.power_alert_high
+
+    # Check low threshold
+    if plug.power_alert_low is not None and current_power < plug.power_alert_low:
+        alert_triggered = True
+        alert_type = "low"
+        threshold = plug.power_alert_low
+
+    if alert_triggered:
+        plug.power_alert_last_triggered = datetime.utcnow()
+        await db.commit()
+
+        # Send notification
+        title = f"Power Alert: {plug.name}"
+        if alert_type == "high":
+            message = f"Power consumption is {current_power:.1f}W, above threshold of {threshold:.1f}W"
+        else:
+            message = f"Power consumption is {current_power:.1f}W, below threshold of {threshold:.1f}W"
+
+        logger.info(f"Power alert triggered for {plug.name}: {message}")
+
+        # Use printer_error event type for power alerts (closest match)
+        await notification_service.send_notification(
+            event_type="printer_error",
+            title=title,
+            message=message,
+            printer_id=plug.printer_id,
+            printer_name=plug.name,
+            context={
+                "error_type": f"Power {alert_type.title()}",
+                "error_detail": message,
+            },
+        )
 
 
 @router.post("/test-connection")

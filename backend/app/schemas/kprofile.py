@@ -51,3 +51,16 @@ class KProfileDelete(BaseModel):
     nozzle_diameter: str  # e.g., "0.4"
     filament_id: str  # Bambu filament identifier
     setting_id: str | None = None  # Setting ID (for X1C series)
+
+
+class KProfileNote(BaseModel):
+    """Schema for K-profile notes (stored locally, not on printer)."""
+
+    setting_id: str  # Unique identifier for the K-profile
+    note: str  # The note content
+
+
+class KProfileNoteResponse(BaseModel):
+    """Response containing notes for K-profiles."""
+
+    notes: dict[str, str]  # mapping of setting_id -> note

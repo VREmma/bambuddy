@@ -12,11 +12,13 @@ interface AddNotificationModalProps {
 }
 
 const PROVIDER_OPTIONS: { value: ProviderType; label: string; description: string }[] = [
-  { value: 'callmebot', label: 'CallMeBot/WhatsApp', description: 'Free WhatsApp notifications via CallMeBot' },
+  { value: 'discord', label: 'Discord', description: 'Send to Discord channel via webhook' },
+  { value: 'telegram', label: 'Telegram', description: 'Notifications via Telegram bot' },
   { value: 'ntfy', label: 'ntfy', description: 'Free, self-hostable push notifications' },
   { value: 'pushover', label: 'Pushover', description: 'Simple, reliable push notifications' },
-  { value: 'telegram', label: 'Telegram', description: 'Notifications via Telegram bot' },
   { value: 'email', label: 'Email', description: 'SMTP email notifications' },
+  { value: 'callmebot', label: 'CallMeBot/WhatsApp', description: 'Free WhatsApp notifications via CallMeBot' },
+  { value: 'webhook', label: 'Webhook', description: 'Generic HTTP POST to any URL' },
 ];
 
 export function AddNotificationModal({ provider, onClose }: AddNotificationModalProps) {
@@ -24,11 +26,26 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
   const isEditing = !!provider;
 
   const [name, setName] = useState(provider?.name || '');
-  const [providerType, setProviderType] = useState<ProviderType>(provider?.provider_type || 'ntfy');
+  const [providerType, setProviderType] = useState<ProviderType>(provider?.provider_type || 'discord');
   const [printerId, setPrinterId] = useState<number | null>(provider?.printer_id || null);
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(provider?.quiet_hours_enabled || false);
   const [quietHoursStart, setQuietHoursStart] = useState(provider?.quiet_hours_start || '22:00');
   const [quietHoursEnd, setQuietHoursEnd] = useState(provider?.quiet_hours_end || '07:00');
+
+  // Daily digest
+  const [dailyDigestEnabled, setDailyDigestEnabled] = useState(provider?.daily_digest_enabled || false);
+  const [dailyDigestTime, setDailyDigestTime] = useState(provider?.daily_digest_time || '08:00');
+
+  // Event toggles
+  const [onPrintStart, setOnPrintStart] = useState(provider?.on_print_start ?? false);
+  const [onPrintComplete, setOnPrintComplete] = useState(provider?.on_print_complete ?? true);
+  const [onPrintFailed, setOnPrintFailed] = useState(provider?.on_print_failed ?? true);
+  const [onPrintStopped, setOnPrintStopped] = useState(provider?.on_print_stopped ?? true);
+  const [onPrintProgress, setOnPrintProgress] = useState(provider?.on_print_progress ?? false);
+  const [onPrinterOffline, setOnPrinterOffline] = useState(provider?.on_printer_offline ?? false);
+  const [onPrinterError, setOnPrinterError] = useState(provider?.on_printer_error ?? false);
+  const [onFilamentLow, setOnFilamentLow] = useState(provider?.on_filament_low ?? false);
+  const [onMaintenanceDue, setOnMaintenanceDue] = useState(provider?.on_maintenance_due ?? false);
 
   // Provider-specific config
   const [config, setConfig] = useState<Record<string, string>>(
@@ -115,6 +132,19 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
       quiet_hours_enabled: quietHoursEnabled,
       quiet_hours_start: quietHoursEnabled ? quietHoursStart : null,
       quiet_hours_end: quietHoursEnabled ? quietHoursEnd : null,
+      // Daily digest
+      daily_digest_enabled: dailyDigestEnabled,
+      daily_digest_time: dailyDigestEnabled ? dailyDigestTime : null,
+      // Event toggles
+      on_print_start: onPrintStart,
+      on_print_complete: onPrintComplete,
+      on_print_failed: onPrintFailed,
+      on_print_stopped: onPrintStopped,
+      on_print_progress: onPrintProgress,
+      on_printer_offline: onPrinterOffline,
+      on_printer_error: onPrinterError,
+      on_filament_low: onFilamentLow,
+      on_maintenance_due: onMaintenanceDue,
     };
 
     if (isEditing) {
@@ -168,6 +198,17 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
           { key: 'password', label: 'Password', placeholder: 'App password', type: 'password', required: false },
           { key: 'from_email', label: 'From Email', placeholder: 'your@email.com', type: 'text', required: true },
           { key: 'to_email', label: 'To Email', placeholder: 'recipient@email.com', type: 'text', required: true },
+        ];
+      case 'discord':
+        return [
+          { key: 'webhook_url', label: 'Webhook URL', placeholder: 'https://discord.com/api/webhooks/...', type: 'text', required: true },
+        ];
+      case 'webhook':
+        return [
+          { key: 'webhook_url', label: 'Webhook URL', placeholder: 'https://example.com/webhook', type: 'text', required: true },
+          { key: 'auth_header', label: 'Authorization', placeholder: 'Bearer token (optional)', type: 'password', required: false },
+          { key: 'field_title', label: 'Title Field Name', placeholder: 'title', type: 'text', required: false },
+          { key: 'field_message', label: 'Message Field Name', placeholder: 'message', type: 'text', required: false },
         ];
       default:
         return [];
@@ -378,6 +419,92 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Daily Digest */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm text-white">Daily Digest</label>
+                <p className="text-xs text-bambu-gray">Batch notifications into a single daily summary</p>
+              </div>
+              <Toggle
+                checked={dailyDigestEnabled}
+                onChange={setDailyDigestEnabled}
+              />
+            </div>
+            {dailyDigestEnabled && (
+              <div>
+                <label className="block text-xs text-bambu-gray mb-1">Send digest at</label>
+                <input
+                  type="time"
+                  value={dailyDigestTime}
+                  onChange={(e) => setDailyDigestTime(e.target.value)}
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                />
+                <p className="text-xs text-bambu-gray mt-1">
+                  Events will be collected and sent as a single summary at this time
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Event Toggles */}
+          <div className="space-y-3">
+            <p className="text-sm text-bambu-gray">Notification Events</p>
+
+            {/* Print Events */}
+            <div className="space-y-2 p-3 bg-bambu-dark rounded-lg">
+              <p className="text-xs text-bambu-gray uppercase tracking-wide mb-2">Print Events</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-white">Start</span>
+                  <Toggle checked={onPrintStart} onChange={setOnPrintStart} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-white">Complete</span>
+                  <Toggle checked={onPrintComplete} onChange={setOnPrintComplete} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-white">Failed</span>
+                  <Toggle checked={onPrintFailed} onChange={setOnPrintFailed} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-white">Stopped</span>
+                  <Toggle checked={onPrintStopped} onChange={setOnPrintStopped} />
+                </div>
+                <div className="flex items-center justify-between col-span-2">
+                  <div>
+                    <span className="text-sm text-white">Progress</span>
+                    <span className="text-xs text-bambu-gray ml-1">(25%, 50%, 75%)</span>
+                  </div>
+                  <Toggle checked={onPrintProgress} onChange={setOnPrintProgress} />
+                </div>
+              </div>
+            </div>
+
+            {/* Printer Status Events */}
+            <div className="space-y-2 p-3 bg-bambu-dark rounded-lg">
+              <p className="text-xs text-bambu-gray uppercase tracking-wide mb-2">Printer Status</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-white">Offline</span>
+                  <Toggle checked={onPrinterOffline} onChange={setOnPrinterOffline} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-white">Error</span>
+                  <Toggle checked={onPrinterError} onChange={setOnPrinterError} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-white">Low Filament</span>
+                  <Toggle checked={onFilamentLow} onChange={setOnFilamentLow} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-white">Maintenance</span>
+                  <Toggle checked={onMaintenanceDue} onChange={setOnMaintenanceDue} />
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Actions */}

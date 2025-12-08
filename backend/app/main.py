@@ -54,7 +54,7 @@ from fastapi.responses import FileResponse
 from backend.app.core.database import init_db, async_session
 from sqlalchemy import select, or_
 from backend.app.core.websocket import ws_manager
-from backend.app.api.routes import printers, archives, websocket, filaments, cloud, smart_plugs, print_queue, kprofiles, notifications, spoolman, updates, maintenance
+from backend.app.api.routes import printers, archives, websocket, filaments, cloud, smart_plugs, print_queue, kprofiles, notifications, notification_templates, spoolman, updates, maintenance, camera
 from backend.app.api.routes import settings as settings_routes
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
@@ -993,10 +993,18 @@ async def lifespan(app: FastAPI):
     # Start the print scheduler
     asyncio.create_task(print_scheduler.run())
 
+    # Start the smart plug scheduler for time-based on/off
+    smart_plug_manager.start_scheduler()
+
+    # Start the notification digest scheduler
+    notification_service.start_digest_scheduler()
+
     yield
 
     # Shutdown
     print_scheduler.stop()
+    smart_plug_manager.stop_scheduler()
+    notification_service.stop_digest_scheduler()
     printer_manager.disconnect_all()
     await close_spoolman_client()
 
@@ -1018,9 +1026,11 @@ app.include_router(smart_plugs.router, prefix=app_settings.api_prefix)
 app.include_router(print_queue.router, prefix=app_settings.api_prefix)
 app.include_router(kprofiles.router, prefix=app_settings.api_prefix)
 app.include_router(notifications.router, prefix=app_settings.api_prefix)
+app.include_router(notification_templates.router, prefix=app_settings.api_prefix)
 app.include_router(spoolman.router, prefix=app_settings.api_prefix)
 app.include_router(updates.router, prefix=app_settings.api_prefix)
 app.include_router(maintenance.router, prefix=app_settings.api_prefix)
+app.include_router(camera.router, prefix=app_settings.api_prefix)
 app.include_router(websocket.router, prefix=app_settings.api_prefix)
 
 
@@ -1036,6 +1046,12 @@ if app_settings.static_dir.exists() and any(app_settings.static_dir.iterdir()):
             "/img",
             StaticFiles(directory=app_settings.static_dir / "img"),
             name="img",
+        )
+    if (app_settings.static_dir / "icons").exists():
+        app.mount(
+            "/icons",
+            StaticFiles(directory=app_settings.static_dir / "icons"),
+            name="icons",
         )
 
 

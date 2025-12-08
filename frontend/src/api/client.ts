@@ -28,6 +28,7 @@ export interface Printer {
   ip_address: string;
   access_code: string;
   model: string | null;
+  location: string | null;  // Group/location name
   nozzle_count: number;  // 1 or 2, auto-detected from MQTT
   is_active: boolean;
   auto_archive: boolean;
@@ -37,8 +38,57 @@ export interface Printer {
 
 export interface HMSError {
   code: string;
+  attr: number;  // Attribute value for constructing wiki URL
   module: number;
   severity: number;  // 1=fatal, 2=serious, 3=common, 4=info
+}
+
+export interface AMSTray {
+  id: number;
+  tray_color: string | null;
+  tray_type: string | null;
+  tray_sub_brands: string | null;  // Full name like "PLA Basic", "PETG HF"
+  tray_id_name: string | null;  // Bambu filament ID like "A00-Y2" (can decode to color)
+  tray_info_idx: string | null;  // Filament preset ID like "GFA00" - maps to cloud setting_id
+  remain: number;
+  k: number | null;  // Pressure advance value
+  tag_uid: string | null;  // RFID tag UID (any tag)
+  tray_uuid: string | null;  // Bambu Lab spool UUID (32-char hex, only valid for Bambu Lab spools)
+  nozzle_temp_min: number | null;  // Min nozzle temperature
+  nozzle_temp_max: number | null;  // Max nozzle temperature
+}
+
+export interface AMSUnit {
+  id: number;
+  humidity: number | null;
+  temp: number | null;
+  is_ams_ht: boolean;  // True for AMS-HT (single spool), False for regular AMS (4 spools)
+  tray: AMSTray[];
+}
+
+export interface NozzleInfo {
+  nozzle_type: string;  // "stainless_steel" or "hardened_steel"
+  nozzle_diameter: string;  // e.g., "0.4"
+}
+
+export interface PrintOptions {
+  // Core AI detectors
+  spaghetti_detector: boolean;
+  print_halt: boolean;
+  halt_print_sensitivity: string;  // "low", "medium", "high" - spaghetti sensitivity
+  first_layer_inspector: boolean;
+  printing_monitor: boolean;
+  buildplate_marker_detector: boolean;
+  allow_skip_parts: boolean;
+  // Additional AI detectors (decoded from cfg bitmask)
+  nozzle_clumping_detector: boolean;
+  nozzle_clumping_sensitivity: string;  // "low", "medium", "high"
+  pileup_detector: boolean;
+  pileup_sensitivity: string;  // "low", "medium", "high"
+  airprint_detector: boolean;
+  airprint_sensitivity: string;  // "low", "medium", "high"
+  auto_recovery_step_loss: boolean;
+  filament_tangle_detect: boolean;
 }
 
 export interface PrinterStatus {
@@ -58,10 +108,51 @@ export interface PrinterStatus {
     bed_target?: number;
     nozzle?: number;
     nozzle_target?: number;
+    nozzle_2?: number;  // Second nozzle for H2 series (dual nozzle)
+    nozzle_2_target?: number;
     chamber?: number;
   } | null;
   cover_url: string | null;
   hms_errors: HMSError[];
+  ams: AMSUnit[];
+  ams_exists: boolean;
+  vt_tray: AMSTray | null;  // Virtual tray / external spool
+  sdcard: boolean;  // SD card inserted
+  store_to_sdcard: boolean;  // Store sent files on SD card
+  timelapse: boolean;  // Timelapse recording active
+  ipcam: boolean;  // Live view enabled
+  wifi_signal: number | null;  // WiFi signal strength in dBm
+  nozzles: NozzleInfo[];  // Nozzle hardware info (index 0=left/primary, 1=right)
+  print_options: PrintOptions | null;  // AI detection and print options
+  // Calibration stage tracking
+  stg_cur: number;  // Current stage number (-1 = not calibrating)
+  stg_cur_name: string | null;  // Human-readable current stage name
+  stg: number[];  // List of stage numbers in calibration sequence
+  // Air conditioning mode (0=cooling, 1=heating)
+  airduct_mode: number;
+  // Print speed level (1=silent, 2=standard, 3=sport, 4=ludicrous)
+  speed_level: number;
+  // Chamber light on/off
+  chamber_light: boolean;
+  // Active extruder for dual nozzle (0=right, 1=left)
+  active_extruder: number;
+  // AMS mapping - which AMS is connected to which nozzle
+  // Format: [ams_id_for_nozzle0, ams_id_for_nozzle1, ...] where -1 means no AMS
+  ams_mapping: number[];
+  // Per-AMS extruder mapping - extracted from each AMS unit's info field
+  // Format: {ams_id: extruder_id} where extruder 0=right, 1=left
+  // Note: JSON keys are always strings
+  ams_extruder_map: Record<string, number>;
+  // Currently loaded tray (global tray ID, 255 = no filament loaded, 254 = external spool)
+  tray_now: number;
+  // AMS status for filament change tracking (0=idle, 1=filament_change, 2=rfid_identifying, 3=assist, 4=calibration)
+  ams_status_main: number;
+  // AMS sub-status for filament change step (when main=1): 4=retraction, 6=load verification, 7=purge
+  ams_status_sub: number;
+  // mc_print_sub_stage - filament change step indicator used by OrcaSlicer/BambuStudio
+  mc_print_sub_stage: number;
+  // Timestamp of last AMS data update (for RFID refresh detection)
+  last_ams_update: number;
 }
 
 export interface PrinterCreate {
@@ -70,6 +161,7 @@ export interface PrinterCreate {
   ip_address: string;
   access_code: string;
   model?: string;
+  location?: string;
   auto_archive?: boolean;
 }
 
@@ -155,6 +247,16 @@ export interface AppSettings {
   energy_tracking_mode: 'print' | 'total';
   check_updates: boolean;
   notification_language: string;
+  // AMS threshold settings
+  ams_humidity_good: number;  // <= this is green
+  ams_humidity_fair: number;  // <= this is orange, > is red
+  ams_temp_good: number;      // <= this is green/blue
+  ams_temp_fair: number;      // <= this is orange, > is red
+  // Date/time format settings
+  date_format: 'system' | 'us' | 'eu' | 'iso';
+  time_format: 'system' | '12h' | '24h';
+  // Default printer
+  default_printer_id: number | null;
 }
 
 export type AppSettingsUpdate = Partial<AppSettings>;
@@ -186,6 +288,63 @@ export interface SlicerSettingsResponse {
   process: SlicerSetting[];
 }
 
+export interface SlicerSettingDetail {
+  message?: string | null;
+  code?: string | null;
+  error?: string | null;
+  public: boolean;
+  version?: string | null;
+  type: string;
+  name: string;
+  update_time?: string | null;
+  nickname?: string | null;
+  base_id?: string | null;
+  setting: Record<string, unknown>;
+  filament_id?: string | null;
+  setting_id?: string | null;
+}
+
+export interface SlicerSettingCreate {
+  type: string;  // 'filament', 'print', or 'printer'
+  name: string;
+  base_id: string;
+  setting: Record<string, unknown>;
+}
+
+export interface SlicerSettingUpdate {
+  name?: string;
+  setting?: Record<string, unknown>;
+}
+
+export interface SlicerSettingDeleteResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface FieldOption {
+  value: string;
+  label: string;
+}
+
+export interface FieldDefinition {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'boolean' | 'select';
+  category: string;
+  description?: string;
+  options?: FieldOption[];
+  unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
+export interface FieldDefinitionsResponse {
+  version: string;
+  description: string;
+  fields: FieldDefinition[];
+}
+
 export interface CloudDevice {
   dev_id: string;
   name: string;
@@ -208,6 +367,16 @@ export interface SmartPlug {
   off_temp_threshold: number;
   username: string | null;
   password: string | null;
+  // Power alerts
+  power_alert_enabled: boolean;
+  power_alert_high: number | null;
+  power_alert_low: number | null;
+  power_alert_last_triggered: string | null;
+  // Schedule
+  schedule_enabled: boolean;
+  schedule_on_time: string | null;
+  schedule_off_time: string | null;
+  // Status
   last_state: string | null;
   last_checked: string | null;
   auto_off_executed: boolean;  // True when auto-off was triggered after print
@@ -227,6 +396,14 @@ export interface SmartPlugCreate {
   off_temp_threshold?: number;
   username?: string | null;
   password?: string | null;
+  // Power alerts
+  power_alert_enabled?: boolean;
+  power_alert_high?: number | null;
+  power_alert_low?: number | null;
+  // Schedule
+  schedule_enabled?: boolean;
+  schedule_on_time?: string | null;
+  schedule_off_time?: string | null;
 }
 
 export interface SmartPlugUpdate {
@@ -241,6 +418,14 @@ export interface SmartPlugUpdate {
   off_temp_threshold?: number;
   username?: string | null;
   password?: string | null;
+  // Power alerts
+  power_alert_enabled?: boolean;
+  power_alert_high?: number | null;
+  power_alert_low?: number | null;
+  // Schedule
+  schedule_enabled?: boolean;
+  schedule_on_time?: string | null;
+  schedule_off_time?: string | null;
 }
 
 export interface SmartPlugEnergy {
@@ -285,6 +470,7 @@ export interface PrintQueueItem {
   archive_name?: string | null;
   archive_thumbnail?: string | null;
   printer_name?: string | null;
+  print_time_seconds?: number | null;  // Estimated print time from archive
 }
 
 export interface PrintQueueItemCreate {
@@ -359,8 +545,45 @@ export interface KProfilesResponse {
   nozzle_diameter: string;
 }
 
+export interface KProfileNote {
+  setting_id: string;
+  note: string;
+}
+
+export interface KProfileNotesResponse {
+  notes: Record<string, string>;  // setting_id -> note
+}
+
+// Slot Preset Mapping
+export interface SlotPresetMapping {
+  ams_id: number;
+  tray_id: number;
+  preset_id: string;
+  preset_name: string;
+}
+
+// Filament types
+export interface Filament {
+  id: number;
+  name: string;
+  type: string;  // PLA, PETG, ABS, etc.
+  brand: string | null;
+  color: string | null;
+  color_hex: string | null;
+  cost_per_kg: number;
+  spool_weight_g: number;
+  currency: string;
+  density: number | null;
+  print_temp_min: number | null;
+  print_temp_max: number | null;
+  bed_temp_min: number | null;
+  bed_temp_max: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // Notification Provider types
-export type ProviderType = 'callmebot' | 'ntfy' | 'pushover' | 'telegram' | 'email';
+export type ProviderType = 'callmebot' | 'ntfy' | 'pushover' | 'telegram' | 'email' | 'discord' | 'webhook';
 
 export interface NotificationProvider {
   id: number;
@@ -383,6 +606,9 @@ export interface NotificationProvider {
   quiet_hours_enabled: boolean;
   quiet_hours_start: string | null;
   quiet_hours_end: string | null;
+  // Daily digest
+  daily_digest_enabled: boolean;
+  daily_digest_time: string | null;
   // Printer filter
   printer_id: number | null;
   // Status tracking
@@ -414,6 +640,9 @@ export interface NotificationProviderCreate {
   quiet_hours_enabled?: boolean;
   quiet_hours_start?: string | null;
   quiet_hours_end?: string | null;
+  // Daily digest
+  daily_digest_enabled?: boolean;
+  daily_digest_time?: string | null;
   // Printer filter
   printer_id?: number | null;
 }
@@ -438,6 +667,9 @@ export interface NotificationProviderUpdate {
   quiet_hours_enabled?: boolean;
   quiet_hours_start?: string | null;
   quiet_hours_end?: string | null;
+  // Daily digest
+  daily_digest_enabled?: boolean;
+  daily_digest_time?: string | null;
   // Printer filter
   printer_id?: number | null;
 }
@@ -485,6 +717,64 @@ export interface EmailConfig {
   use_tls?: boolean;
 }
 
+// Notification Template types
+export interface NotificationTemplate {
+  id: number;
+  event_type: string;
+  name: string;
+  title_template: string;
+  body_template: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationTemplateUpdate {
+  title_template?: string;
+  body_template?: string;
+}
+
+export interface EventVariablesResponse {
+  event_type: string;
+  event_name: string;
+  variables: string[];
+}
+
+export interface TemplatePreviewRequest {
+  event_type: string;
+  title_template: string;
+  body_template: string;
+}
+
+export interface TemplatePreviewResponse {
+  title: string;
+  body: string;
+}
+
+// Notification Log types
+export interface NotificationLogEntry {
+  id: number;
+  provider_id: number;
+  provider_name: string | null;
+  provider_type: string | null;
+  event_type: string;
+  title: string;
+  message: string;
+  success: boolean;
+  error_message: string | null;
+  printer_id: number | null;
+  printer_name: string | null;
+  created_at: string;
+}
+
+export interface NotificationLogStats {
+  total: number;
+  success_count: number;
+  failure_count: number;
+  by_event_type: Record<string, number>;
+  by_provider: Record<string, number>;
+}
+
 // Spoolman types
 export interface SpoolmanStatus {
   enabled: boolean;
@@ -529,6 +819,7 @@ export interface MaintenanceType {
   name: string;
   description: string | null;
   default_interval_hours: number;
+  interval_type: 'hours' | 'days';  // "hours" = print hours, "days" = calendar days
   icon: string | null;
   is_system: boolean;
   created_at: string;
@@ -538,6 +829,7 @@ export interface MaintenanceTypeCreate {
   name: string;
   description?: string | null;
   default_interval_hours?: number;
+  interval_type?: 'hours' | 'days';
   icon?: string | null;
 }
 
@@ -549,10 +841,13 @@ export interface MaintenanceStatus {
   maintenance_type_name: string;
   maintenance_type_icon: string | null;
   enabled: boolean;
-  interval_hours: number;
+  interval_hours: number;  // For hours type: print hours; for days type: number of days
+  interval_type: 'hours' | 'days';
   current_hours: number;
   hours_since_maintenance: number;
   hours_until_due: number;
+  days_since_maintenance: number | null;  // For days type
+  days_until_due: number | null;  // For days type
   is_due: boolean;
   is_warning: boolean;
   last_performed_at: string | null;
@@ -854,6 +1149,23 @@ export const api = {
     }),
   resetSettings: () =>
     request<AppSettings>('/settings/reset', { method: 'POST' }),
+  exportBackup: async () => {
+    const response = await fetch(`${API_BASE}/settings/backup`);
+    return response.json();
+  },
+  importBackup: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`${API_BASE}/settings/restore`, {
+      method: 'POST',
+      body: formData,
+    });
+    return response.json() as Promise<{
+      success: boolean;
+      message: string;
+      restored?: { settings: number; notification_providers: number; smart_plugs: number };
+    }>;
+  },
   checkFfmpeg: () =>
     request<{ installed: boolean; path: string | null }>('/settings/check-ffmpeg'),
 
@@ -876,11 +1188,29 @@ export const api = {
     }),
   cloudLogout: () =>
     request<{ success: boolean }>('/cloud/logout', { method: 'POST' }),
-  getCloudSettings: (version = '01.09.00.00') =>
+  getCloudSettings: (version = '02.04.00.70') =>
     request<SlicerSettingsResponse>(`/cloud/settings?version=${version}`),
   getCloudSettingDetail: (settingId: string) =>
-    request<Record<string, unknown>>(`/cloud/settings/${settingId}`),
+    request<SlicerSettingDetail>(`/cloud/settings/${settingId}`),
+  createCloudSetting: (data: SlicerSettingCreate) =>
+    request<SlicerSettingDetail>('/cloud/settings', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateCloudSetting: (settingId: string, data: SlicerSettingUpdate) =>
+    request<SlicerSettingDetail>(`/cloud/settings/${settingId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteCloudSetting: (settingId: string) =>
+    request<SlicerSettingDeleteResponse>(`/cloud/settings/${settingId}`, {
+      method: 'DELETE',
+    }),
   getCloudDevices: () => request<CloudDevice[]>('/cloud/devices'),
+  getCloudFields: (presetType: 'filament' | 'print' | 'process' | 'printer') =>
+    request<FieldDefinitionsResponse>(`/cloud/fields/${presetType}`),
+  getAllCloudFields: () =>
+    request<Record<string, FieldDefinitionsResponse>>('/cloud/fields'),
 
   // Smart Plugs
   getSmartPlugs: () => request<SmartPlug[]>('/smart-plugs/'),
@@ -954,6 +1284,43 @@ export const api = {
       method: 'DELETE',
       body: JSON.stringify(profile),
     }),
+  setKProfilesBatch: (printerId: number, profiles: KProfileCreate[]) =>
+    request<{ success: boolean; message: string }>(`/printers/${printerId}/kprofiles/batch`, {
+      method: 'POST',
+      body: JSON.stringify(profiles),
+    }),
+
+  // K-Profile Notes (stored locally, not on printer)
+  getKProfileNotes: (printerId: number) =>
+    request<KProfileNotesResponse>(`/printers/${printerId}/kprofiles/notes`),
+  setKProfileNote: (printerId: number, settingId: string, note: string) =>
+    request<{ success: boolean; message: string }>(`/printers/${printerId}/kprofiles/notes`, {
+      method: 'PUT',
+      body: JSON.stringify({ setting_id: settingId, note }),
+    }),
+  deleteKProfileNote: (printerId: number, settingId: string) =>
+    request<{ success: boolean; message: string }>(`/printers/${printerId}/kprofiles/notes/${encodeURIComponent(settingId)}`, {
+      method: 'DELETE',
+    }),
+
+  // Slot Preset Mappings
+  getSlotPresets: (printerId: number) =>
+    request<Record<number, SlotPresetMapping>>(`/printers/${printerId}/slot-presets`),
+  getSlotPreset: (printerId: number, amsId: number, trayId: number) =>
+    request<SlotPresetMapping | null>(`/printers/${printerId}/slot-presets/${amsId}/${trayId}`),
+  saveSlotPreset: (printerId: number, amsId: number, trayId: number, presetId: string, presetName: string) =>
+    request<SlotPresetMapping>(`/printers/${printerId}/slot-presets/${amsId}/${trayId}?preset_id=${encodeURIComponent(presetId)}&preset_name=${encodeURIComponent(presetName)}`, {
+      method: 'PUT',
+    }),
+  deleteSlotPreset: (printerId: number, amsId: number, trayId: number) =>
+    request<{ success: boolean }>(`/printers/${printerId}/slot-presets/${amsId}/${trayId}`, {
+      method: 'DELETE',
+    }),
+
+  // Filaments
+  listFilaments: () => request<Filament[]>('/filaments/'),
+  getFilament: (id: number) => request<Filament>(`/filaments/${id}`),
+  getFilamentsByType: (type: string) => request<Filament[]>(`/filaments/by-type/${type}`),
 
   // Notification Providers
   getNotificationProviders: () => request<NotificationProvider[]>('/notifications/'),
@@ -977,6 +1344,64 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  testAllNotificationProviders: () =>
+    request<{
+      tested: number;
+      success: number;
+      failed: number;
+      results: Array<{
+        provider_id: number;
+        provider_name: string;
+        provider_type: string;
+        success: boolean;
+        message: string;
+      }>;
+    }>('/notifications/test-all', { method: 'POST' }),
+
+  // Notification Templates
+  getNotificationTemplates: () => request<NotificationTemplate[]>('/notification-templates'),
+  getNotificationTemplate: (id: number) => request<NotificationTemplate>(`/notification-templates/${id}`),
+  updateNotificationTemplate: (id: number, data: NotificationTemplateUpdate) =>
+    request<NotificationTemplate>(`/notification-templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  resetNotificationTemplate: (id: number) =>
+    request<NotificationTemplate>(`/notification-templates/${id}/reset`, {
+      method: 'POST',
+    }),
+  getTemplateVariables: () => request<EventVariablesResponse[]>('/notification-templates/variables'),
+  previewTemplate: (data: TemplatePreviewRequest) =>
+    request<TemplatePreviewResponse>('/notification-templates/preview', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Notification Logs
+  getNotificationLogs: (params?: {
+    limit?: number;
+    offset?: number;
+    provider_id?: number;
+    event_type?: string;
+    success?: boolean;
+    days?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+    if (params?.provider_id) searchParams.set('provider_id', String(params.provider_id));
+    if (params?.event_type) searchParams.set('event_type', params.event_type);
+    if (params?.success !== undefined) searchParams.set('success', String(params.success));
+    if (params?.days) searchParams.set('days', String(params.days));
+    return request<NotificationLogEntry[]>(`/notifications/logs?${searchParams}`);
+  },
+  getNotificationLogStats: (days = 7) =>
+    request<NotificationLogStats>(`/notifications/logs/stats?days=${days}`),
+  clearNotificationLogs: (olderThanDays = 30) =>
+    request<{ deleted: number; message: string }>(
+      `/notifications/logs?older_than_days=${olderThanDays}`,
+      { method: 'DELETE' }
+    ),
 
   // Spoolman Integration
   getSpoolmanStatus: () => request<SpoolmanStatus>('/spoolman/status'),
@@ -1027,7 +1452,7 @@ export const api = {
   getMaintenanceOverview: () => request<PrinterMaintenanceOverview[]>('/maintenance/overview'),
   getPrinterMaintenance: (printerId: number) =>
     request<PrinterMaintenanceOverview>(`/maintenance/printers/${printerId}`),
-  updateMaintenanceItem: (itemId: number, data: { custom_interval_hours?: number | null; enabled?: boolean }) =>
+  updateMaintenanceItem: (itemId: number, data: { custom_interval_hours?: number | null; custom_interval_type?: 'hours' | 'days' | null; enabled?: boolean }) =>
     request<MaintenanceStatus>(`/maintenance/items/${itemId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -1045,4 +1470,12 @@ export const api = {
       `/maintenance/printers/${printerId}/hours?total_hours=${totalHours}`,
       { method: 'PATCH' }
     ),
+
+  // Camera
+  getCameraStreamUrl: (printerId: number, fps = 10) =>
+    `${API_BASE}/printers/${printerId}/camera/stream?fps=${fps}`,
+  getCameraSnapshotUrl: (printerId: number) =>
+    `${API_BASE}/printers/${printerId}/camera/snapshot`,
+  testCameraConnection: (printerId: number) =>
+    request<{ success: boolean; message?: string; error?: string }>(`/printers/${printerId}/camera/test`),
 };

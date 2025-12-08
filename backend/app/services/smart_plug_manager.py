@@ -23,10 +23,80 @@ class SmartPlugManager:
     def __init__(self):
         self._pending_off: dict[int, asyncio.Task] = {}  # plug_id -> task
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._scheduler_task: asyncio.Task | None = None
+        self._last_schedule_check: dict[int, str] = {}  # plug_id -> "HH:MM" last executed
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         """Set the event loop for async operations."""
         self._loop = loop
+
+    def start_scheduler(self):
+        """Start the background scheduler for time-based plug control."""
+        if self._scheduler_task is None:
+            self._scheduler_task = asyncio.create_task(self._schedule_loop())
+            logger.info("Smart plug scheduler started")
+
+    def stop_scheduler(self):
+        """Stop the background scheduler."""
+        if self._scheduler_task:
+            self._scheduler_task.cancel()
+            self._scheduler_task = None
+            logger.info("Smart plug scheduler stopped")
+
+    async def _schedule_loop(self):
+        """Background loop that checks scheduled on/off times every minute."""
+        while True:
+            try:
+                await self._check_schedules()
+            except Exception as e:
+                logger.error(f"Error in schedule check: {e}")
+
+            # Wait until the next minute
+            await asyncio.sleep(60)
+
+    async def _check_schedules(self):
+        """Check all plugs for scheduled on/off times."""
+        from backend.app.core.database import async_session
+        from backend.app.models.smart_plug import SmartPlug
+
+        current_time = datetime.now().strftime("%H:%M")
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(SmartPlug).where(
+                    SmartPlug.enabled == True,
+                    SmartPlug.schedule_enabled == True,
+                )
+            )
+            plugs = result.scalars().all()
+
+            for plug in plugs:
+                # Check if we should turn on
+                if plug.schedule_on_time == current_time:
+                    last_check = self._last_schedule_check.get(plug.id)
+                    if last_check != f"on:{current_time}":
+                        logger.info(f"Schedule: Turning on plug '{plug.name}' at {current_time}")
+                        success = await tasmota_service.turn_on(plug)
+                        if success:
+                            plug.last_state = "ON"
+                            plug.last_checked = datetime.utcnow()
+                            self._last_schedule_check[plug.id] = f"on:{current_time}"
+
+                # Check if we should turn off
+                if plug.schedule_off_time == current_time:
+                    last_check = self._last_schedule_check.get(plug.id)
+                    if last_check != f"off:{current_time}":
+                        logger.info(f"Schedule: Turning off plug '{plug.name}' at {current_time}")
+                        success = await tasmota_service.turn_off(plug)
+                        if success:
+                            plug.last_state = "OFF"
+                            plug.last_checked = datetime.utcnow()
+                            self._last_schedule_check[plug.id] = f"off:{current_time}"
+                            # Mark printer offline if linked
+                            if plug.printer_id:
+                                printer_manager.mark_printer_offline(plug.printer_id)
+
+            await db.commit()
 
     async def _get_plug_for_printer(
         self, printer_id: int, db: AsyncSession

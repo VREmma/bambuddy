@@ -1,30 +1,42 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Loader2, Check, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe } from 'lucide-react';
+import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Upload, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
-import type { AppSettings, SmartPlug, NotificationProvider, UpdateStatus } from '../api/client';
+import type { AppSettings, SmartPlug, SmartPlugStatus, NotificationProvider, NotificationTemplate, UpdateStatus } from '../api/client';
 import { Card, CardContent, CardHeader } from '../components/Card';
 import { Button } from '../components/Button';
 import { SmartPlugCard } from '../components/SmartPlugCard';
 import { AddSmartPlugModal } from '../components/AddSmartPlugModal';
 import { NotificationProviderCard } from '../components/NotificationProviderCard';
 import { AddNotificationModal } from '../components/AddNotificationModal';
+import { NotificationTemplateEditor } from '../components/NotificationTemplateEditor';
+import { NotificationLogViewer } from '../components/NotificationLogViewer';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { SpoolmanSettings } from '../components/SpoolmanSettings';
 import { defaultNavItems, getDefaultView, setDefaultView } from '../components/Layout';
 import { availableLanguages } from '../i18n';
-import { useState, useEffect } from 'react';
+import { useToast } from '../contexts/ToastContext';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
   const { t, i18n } = useTranslation();
+  const { showToast } = useToast();
   const [localSettings, setLocalSettings] = useState<AppSettings | null>(null);
-  const [hasChanges, setHasChanges] = useState(false);
-  const [showSaved, setShowSaved] = useState(false);
   const [showPlugModal, setShowPlugModal] = useState(false);
   const [editingPlug, setEditingPlug] = useState<SmartPlug | null>(null);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [editingProvider, setEditingProvider] = useState<NotificationProvider | null>(null);
+  const [editingTemplate, setEditingTemplate] = useState<NotificationTemplate | null>(null);
+  const [showLogViewer, setShowLogViewer] = useState(false);
   const [defaultView, setDefaultViewState] = useState<string>(getDefaultView());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeTab, setActiveTab] = useState<'general' | 'plugs' | 'notifications'>('general');
+
+  // Confirm modal states
+  const [showClearLogsConfirm, setShowClearLogsConfirm] = useState(false);
+  const [showClearStorageConfirm, setShowClearStorageConfirm] = useState(false);
+  const [showBulkPlugConfirm, setShowBulkPlugConfirm] = useState<'on' | 'off' | null>(null);
 
   const handleDefaultViewChange = (path: string) => {
     setDefaultViewState(path);
@@ -46,9 +58,65 @@ export function SettingsPage() {
     queryFn: api.getSmartPlugs,
   });
 
+  // Fetch energy data for all smart plugs when on the plugs tab
+  const { data: plugEnergySummary, isLoading: energyLoading } = useQuery({
+    queryKey: ['smart-plugs-energy', smartPlugs?.map(p => p.id)],
+    queryFn: async () => {
+      if (!smartPlugs || smartPlugs.length === 0) return null;
+      const statuses = await Promise.all(
+        smartPlugs.filter(p => p.enabled).map(async (plug) => {
+          try {
+            const status = await api.getSmartPlugStatus(plug.id);
+            return { plug, status };
+          } catch {
+            return { plug, status: null as SmartPlugStatus | null };
+          }
+        })
+      );
+
+      // Aggregate energy data
+      let totalPower = 0;
+      let totalToday = 0;
+      let totalYesterday = 0;
+      let totalLifetime = 0;
+      let reachableCount = 0;
+
+      for (const { status } of statuses) {
+        if (status?.reachable && status.energy) {
+          reachableCount++;
+          if (status.energy.power != null) totalPower += status.energy.power;
+          if (status.energy.today != null) totalToday += status.energy.today;
+          if (status.energy.yesterday != null) totalYesterday += status.energy.yesterday;
+          if (status.energy.total != null) totalLifetime += status.energy.total;
+        }
+      }
+
+      return {
+        totalPower,
+        totalToday,
+        totalYesterday,
+        totalLifetime,
+        reachableCount,
+        totalPlugs: smartPlugs.filter(p => p.enabled).length,
+      };
+    },
+    enabled: activeTab === 'plugs' && !!smartPlugs && smartPlugs.length > 0,
+    refetchInterval: activeTab === 'plugs' ? 10000 : false, // Refresh every 10s when on plugs tab
+  });
+
   const { data: notificationProviders, isLoading: providersLoading } = useQuery({
     queryKey: ['notification-providers'],
     queryFn: api.getNotificationProviders,
+  });
+
+  const { data: printers } = useQuery({
+    queryKey: ['printers'],
+    queryFn: api.getPrinters,
+  });
+
+  const { data: notificationTemplates, isLoading: templatesLoading } = useQuery({
+    queryKey: ['notification-templates'],
+    queryFn: api.getNotificationTemplates,
   });
 
   const { data: ffmpegStatus } = useQuery({
@@ -87,27 +155,82 @@ export function SettingsPage() {
     },
   });
 
+  // Test all notification providers
+  const [testAllResult, setTestAllResult] = useState<{
+    tested: number;
+    success: number;
+    failed: number;
+    results: Array<{
+      provider_id: number;
+      provider_name: string;
+      provider_type: string;
+      success: boolean;
+      message: string;
+    }>;
+  } | null>(null);
+
+  const testAllMutation = useMutation({
+    mutationFn: api.testAllNotificationProviders,
+    onSuccess: (data) => {
+      setTestAllResult(data);
+      queryClient.invalidateQueries({ queryKey: ['notification-providers'] });
+      if (data.failed === 0) {
+        showToast(`All ${data.tested} providers tested successfully!`, 'success');
+      } else {
+        showToast(`${data.success}/${data.tested} providers succeeded`, data.failed > 0 ? 'error' : 'success');
+      }
+    },
+    onError: (error: Error) => {
+      showToast(`Failed to test providers: ${error.message}`, 'error');
+    },
+  });
+
+  // Bulk action for smart plugs
+  const bulkPlugActionMutation = useMutation({
+    mutationFn: async (action: 'on' | 'off') => {
+      if (!smartPlugs) return { success: 0, failed: 0 };
+      const enabledPlugs = smartPlugs.filter(p => p.enabled);
+      const results = await Promise.all(
+        enabledPlugs.map(async (plug) => {
+          try {
+            await api.controlSmartPlug(plug.id, action);
+            return { success: true };
+          } catch {
+            return { success: false };
+          }
+        })
+      );
+      return {
+        success: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length,
+      };
+    },
+    onSuccess: (data, action) => {
+      queryClient.invalidateQueries({ queryKey: ['smart-plugs'] });
+      queryClient.invalidateQueries({ queryKey: ['smart-plugs-energy'] });
+      if (data.failed === 0) {
+        showToast(`All ${data.success} plugs turned ${action}`, 'success');
+      } else {
+        showToast(`${data.success} plugs turned ${action}, ${data.failed} failed`, 'error');
+      }
+    },
+    onError: (error: Error) => {
+      showToast(`Failed: ${error.message}`, 'error');
+    },
+  });
+
+  // Ref for debounce timeout
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isInitialLoadRef = useRef(true);
+
   // Sync local state when settings load
   useEffect(() => {
     if (settings && !localSettings) {
       setLocalSettings(settings);
-    }
-  }, [settings, localSettings]);
-
-  // Track changes
-  useEffect(() => {
-    if (settings && localSettings) {
-      const changed =
-        settings.auto_archive !== localSettings.auto_archive ||
-        settings.save_thumbnails !== localSettings.save_thumbnails ||
-        settings.capture_finish_photo !== localSettings.capture_finish_photo ||
-        settings.default_filament_cost !== localSettings.default_filament_cost ||
-        settings.currency !== localSettings.currency ||
-        settings.energy_cost_per_kwh !== localSettings.energy_cost_per_kwh ||
-        settings.energy_tracking_mode !== localSettings.energy_tracking_mode ||
-        settings.check_updates !== localSettings.check_updates ||
-        settings.notification_language !== localSettings.notification_language;
-      setHasChanges(changed);
+      // Mark initial load complete after a short delay
+      setTimeout(() => {
+        isInitialLoadRef.current = false;
+      }, 100);
     }
   }, [settings, localSettings]);
 
@@ -115,26 +238,66 @@ export function SettingsPage() {
     mutationFn: api.updateSettings,
     onSuccess: (data) => {
       queryClient.setQueryData(['settings'], data);
-      setLocalSettings(data);
-      setHasChanges(false);
-      setShowSaved(true);
-      setTimeout(() => setShowSaved(false), 2000);
       // Invalidate archive stats to reflect energy tracking mode change
       queryClient.invalidateQueries({ queryKey: ['archiveStats'] });
+      showToast('Settings saved', 'success');
+    },
+    onError: (error: Error) => {
+      showToast(`Failed to save: ${error.message}`, 'error');
     },
   });
 
-  const handleSave = () => {
-    if (localSettings) {
-      updateMutation.mutate(localSettings);
+  // Debounced auto-save when localSettings change
+  useEffect(() => {
+    // Skip if initial load or no settings
+    if (isInitialLoadRef.current || !localSettings || !settings) {
+      return;
     }
-  };
 
-  const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    if (localSettings) {
-      setLocalSettings({ ...localSettings, [key]: value });
+    // Check if there are actual changes
+    const hasChanges =
+      settings.auto_archive !== localSettings.auto_archive ||
+      settings.save_thumbnails !== localSettings.save_thumbnails ||
+      settings.capture_finish_photo !== localSettings.capture_finish_photo ||
+      settings.default_filament_cost !== localSettings.default_filament_cost ||
+      settings.currency !== localSettings.currency ||
+      settings.energy_cost_per_kwh !== localSettings.energy_cost_per_kwh ||
+      settings.energy_tracking_mode !== localSettings.energy_tracking_mode ||
+      settings.check_updates !== localSettings.check_updates ||
+      settings.notification_language !== localSettings.notification_language ||
+      settings.ams_humidity_good !== localSettings.ams_humidity_good ||
+      settings.ams_humidity_fair !== localSettings.ams_humidity_fair ||
+      settings.ams_temp_good !== localSettings.ams_temp_good ||
+      settings.ams_temp_fair !== localSettings.ams_temp_fair ||
+      settings.date_format !== localSettings.date_format ||
+      settings.time_format !== localSettings.time_format ||
+      settings.default_printer_id !== localSettings.default_printer_id;
+
+    if (!hasChanges) {
+      return;
     }
-  };
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set new debounced save (500ms delay)
+    saveTimeoutRef.current = setTimeout(() => {
+      updateMutation.mutate(localSettings);
+    }, 500);
+
+    // Cleanup on unmount or when localSettings changes again
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [localSettings, settings, updateMutation]);
+
+  const updateSetting = useCallback(<K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    setLocalSettings(prev => prev ? { ...prev, [key]: value } : null);
+  }, []);
 
   if (isLoading || !localSettings) {
     return (
@@ -146,35 +309,176 @@ export function SettingsPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Settings</h1>
-          <p className="text-bambu-gray">Configure Bambusy</p>
-        </div>
-        <Button
-          onClick={handleSave}
-          disabled={!hasChanges || updateMutation.isPending}
-        >
-          {updateMutation.isPending ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : showSaved ? (
-            <Check className="w-4 h-4" />
-          ) : (
-            <Save className="w-4 h-4" />
-          )}
-          {showSaved ? 'Saved!' : 'Save'}
-        </Button>
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-white">Settings</h1>
+        <p className="text-bambu-gray">Configure Bambusy</p>
       </div>
 
-      {updateMutation.isError && (
-        <div className="mb-6 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-sm text-red-400">
-          Failed to save settings: {(updateMutation.error as Error).message}
-        </div>
-      )}
+      {/* Tab Navigation */}
+      <div className="flex gap-1 mb-6 border-b border-bambu-dark-tertiary">
+        <button
+          onClick={() => setActiveTab('general')}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            activeTab === 'general'
+              ? 'text-bambu-green border-bambu-green'
+              : 'text-bambu-gray hover:text-white border-transparent'
+          }`}
+        >
+          General
+        </button>
+        <button
+          onClick={() => setActiveTab('plugs')}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-2 ${
+            activeTab === 'plugs'
+              ? 'text-bambu-green border-bambu-green'
+              : 'text-bambu-gray hover:text-white border-transparent'
+          }`}
+        >
+          <Plug className="w-4 h-4" />
+          Smart Plugs
+          {smartPlugs && smartPlugs.length > 0 && (
+            <span className="text-xs bg-bambu-dark-tertiary px-1.5 py-0.5 rounded-full">
+              {smartPlugs.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('notifications')}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-2 ${
+            activeTab === 'notifications'
+              ? 'text-bambu-green border-bambu-green'
+              : 'text-bambu-gray hover:text-white border-transparent'
+          }`}
+        >
+          <Bell className="w-4 h-4" />
+          Notifications
+          {notificationProviders && notificationProviders.length > 0 && (
+            <span className="text-xs bg-bambu-dark-tertiary px-1.5 py-0.5 rounded-full">
+              {notificationProviders.length}
+            </span>
+          )}
+        </button>
+      </div>
 
+      {/* General Tab */}
+      {activeTab === 'general' && (
       <div className="flex gap-8">
         {/* Left Column - General Settings */}
         <div className="space-y-6 flex-1 max-w-xl">
+          <Card>
+            <CardHeader>
+              <h2 className="text-lg font-semibold text-white">{t('settings.general')}</h2>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="block text-sm text-bambu-gray mb-1">
+                  <Globe className="w-4 h-4 inline mr-1" />
+                  {t('settings.language')}
+                </label>
+                <select
+                  value={i18n.language}
+                  onChange={(e) => i18n.changeLanguage(e.target.value)}
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                >
+                  {availableLanguages.map((lang) => (
+                    <option key={lang.code} value={lang.code}>
+                      {lang.nativeName} ({lang.name})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-bambu-gray mt-1">
+                  {t('settings.languageDescription')}
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-bambu-gray mb-1">
+                  {t('settings.defaultView')}
+                </label>
+                <select
+                  value={defaultView}
+                  onChange={(e) => handleDefaultViewChange(e.target.value)}
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                >
+                  {defaultNavItems.map((item) => (
+                    <option key={item.id} value={item.to}>
+                      {t(item.labelKey)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-bambu-gray mt-1">
+                  {t('settings.defaultViewDescription')}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-bambu-gray mb-1">
+                    Date Format
+                  </label>
+                  <select
+                    value={localSettings.date_format || 'system'}
+                    onChange={(e) => updateSetting('date_format', e.target.value as 'system' | 'us' | 'eu' | 'iso')}
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                  >
+                    <option value="system">System Default</option>
+                    <option value="us">US (MM/DD/YYYY)</option>
+                    <option value="eu">EU (DD/MM/YYYY)</option>
+                    <option value="iso">ISO (YYYY-MM-DD)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-bambu-gray mb-1">
+                    Time Format
+                  </label>
+                  <select
+                    value={localSettings.time_format || 'system'}
+                    onChange={(e) => updateSetting('time_format', e.target.value as 'system' | '12h' | '24h')}
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                  >
+                    <option value="system">System Default</option>
+                    <option value="12h">12-hour (3:30 PM)</option>
+                    <option value="24h">24-hour (15:30)</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-bambu-gray mb-1">
+                  Default Printer
+                </label>
+                <select
+                  value={localSettings.default_printer_id ?? ''}
+                  onChange={(e) => updateSetting('default_printer_id', e.target.value ? Number(e.target.value) : null)}
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                >
+                  <option value="">No default (ask each time)</option>
+                  {printers?.map((printer) => (
+                    <option key={printer.id} value={printer.id}>
+                      {printer.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-bambu-gray mt-1">
+                  Pre-select this printer for uploads, reprints, and other operations.
+                </p>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white">Sidebar order</p>
+                  <p className="text-sm text-bambu-gray">
+                    Drag items in the sidebar to reorder. Reset to default order here.
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleResetSidebarOrder}
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Reset
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <h2 className="text-lg font-semibold text-white">Archive Settings</h2>
@@ -319,75 +623,118 @@ export function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </div>
 
+        {/* Second Column - AMS & Spoolman */}
+        <div className="space-y-6 flex-1 max-w-md">
           <Card>
             <CardHeader>
-              <h2 className="text-lg font-semibold text-white">{t('settings.general')}</h2>
+              <h2 className="text-lg font-semibold text-white">AMS Display Thresholds</h2>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <label className="block text-sm text-bambu-gray mb-1">
-                  <Globe className="w-4 h-4 inline mr-1" />
-                  {t('settings.language')}
-                </label>
-                <select
-                  value={i18n.language}
-                  onChange={(e) => i18n.changeLanguage(e.target.value)}
-                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                >
-                  {availableLanguages.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.nativeName} ({lang.name})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-bambu-gray mt-1">
-                  {t('settings.languageDescription')}
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm text-bambu-gray mb-1">
-                  {t('settings.defaultView')}
-                </label>
-                <select
-                  value={defaultView}
-                  onChange={(e) => handleDefaultViewChange(e.target.value)}
-                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                >
-                  {defaultNavItems.map((item) => (
-                    <option key={item.id} value={item.to}>
-                      {t(item.labelKey)}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-bambu-gray mt-1">
-                  {t('settings.defaultViewDescription')}
-                </p>
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-white">Sidebar order</p>
-                  <p className="text-sm text-bambu-gray">
-                    Drag items in the sidebar to reorder. Reset to default order here.
-                  </p>
+              <p className="text-sm text-bambu-gray">
+                Configure color thresholds for AMS humidity and temperature indicators.
+              </p>
+
+              {/* Humidity Thresholds */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-white">
+                  <Droplets className="w-4 h-4 text-blue-400" />
+                  <span className="font-medium">Humidity</span>
                 </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleResetSidebarOrder}
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  Reset
-                </Button>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-bambu-gray mb-1">
+                      Good (green) ≤
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={localSettings.ams_humidity_good ?? 40}
+                        onChange={(e) => updateSetting('ams_humidity_good', parseInt(e.target.value) || 40)}
+                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                      />
+                      <span className="text-bambu-gray">%</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-bambu-gray mb-1">
+                      Fair (orange) ≤
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={localSettings.ams_humidity_fair ?? 60}
+                        onChange={(e) => updateSetting('ams_humidity_fair', parseInt(e.target.value) || 60)}
+                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                      />
+                      <span className="text-bambu-gray">%</span>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-bambu-gray">
+                  Above fair threshold shows as red (bad)
+                </p>
+              </div>
+
+              {/* Temperature Thresholds */}
+              <div className="space-y-3 pt-2 border-t border-bambu-dark-tertiary">
+                <div className="flex items-center gap-2 text-white">
+                  <Thermometer className="w-4 h-4 text-orange-400" />
+                  <span className="font-medium">Temperature</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-bambu-gray mb-1">
+                      Good (blue) ≤
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        max="60"
+                        value={localSettings.ams_temp_good ?? 28}
+                        onChange={(e) => updateSetting('ams_temp_good', parseFloat(e.target.value) || 28)}
+                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                      />
+                      <span className="text-bambu-gray">°C</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-bambu-gray mb-1">
+                      Fair (orange) ≤
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        max="60"
+                        value={localSettings.ams_temp_fair ?? 35}
+                        onChange={(e) => updateSetting('ams_temp_fair', parseFloat(e.target.value) || 35)}
+                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                      />
+                      <span className="text-bambu-gray">°C</span>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-bambu-gray">
+                  Above fair threshold shows as red (hot)
+                </p>
               </div>
             </CardContent>
           </Card>
+
+          <SpoolmanSettings />
         </div>
 
-        {/* Second Column - Spoolman & Updates */}
-        <div className="space-y-6 flex-1 max-w-md">
-          <SpoolmanSettings />
-
+        {/* Third Column - Updates */}
+        <div className="space-y-6 flex-1 max-w-sm">
           <Card>
             <CardHeader>
               <h2 className="text-lg font-semibold text-white">Updates</h2>
@@ -509,70 +856,353 @@ export function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-        </div>
 
-        {/* Third Column - Smart Plugs */}
-        <div className="w-80 flex-shrink-0">
+          {/* Data Management */}
           <Card>
             <CardHeader>
+              <h2 className="text-lg font-semibold text-white">Data Management</h2>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Backup/Restore */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Plug className="w-5 h-5 text-bambu-green" />
-                  <h2 className="text-lg font-semibold text-white">Smart Plugs</h2>
+                <div>
+                  <p className="text-white">Backup Settings</p>
+                  <p className="text-sm text-bambu-gray">
+                    Export settings, providers, and plugs to JSON
+                  </p>
                 </div>
                 <Button
+                  variant="secondary"
                   size="sm"
-                  onClick={() => {
-                    setEditingPlug(null);
-                    setShowPlugModal(true);
+                  onClick={async () => {
+                    try {
+                      const backup = await api.exportBackup();
+                      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `bambutrack-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      showToast('Backup downloaded', 'success');
+                    } catch (err) {
+                      showToast('Failed to create backup', 'error');
+                    }
                   }}
                 >
-                  <Plus className="w-4 h-4" />
-                  Add
+                  <Download className="w-4 h-4" />
+                  Export
                 </Button>
               </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-bambu-gray mb-4">
-                Connect Tasmota-based smart plugs to automate power control for your printers.
-              </p>
-              {plugsLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white">Restore Settings</p>
+                  <p className="text-sm text-bambu-gray">
+                    Import settings from a backup file
+                  </p>
                 </div>
-              ) : smartPlugs && smartPlugs.length > 0 ? (
-                <div className="space-y-4">
-                  {smartPlugs.map((plug) => (
-                    <SmartPlugCard
-                      key={plug.id}
-                      plug={plug}
-                      onEdit={(p) => {
-                        setEditingPlug(p);
-                        setShowPlugModal(true);
-                      }}
-                    />
-                  ))}
+                <div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const result = await api.importBackup(file);
+                        if (result.success) {
+                          showToast(result.message, 'success');
+                          queryClient.invalidateQueries();
+                        } else {
+                          showToast(result.message, 'error');
+                        }
+                      } catch (err) {
+                        showToast('Failed to restore backup', 'error');
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="w-4 h-4" />
+                    Import
+                  </Button>
                 </div>
-              ) : (
-                <div className="text-center py-8 text-bambu-gray">
-                  <Plug className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                  <p>No smart plugs configured</p>
-                  <p className="text-sm mt-1">Add a Tasmota plug to get started</p>
+              </div>
+
+              <div className="border-t border-bambu-dark-tertiary pt-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white">Clear Notification Logs</p>
+                    <p className="text-sm text-bambu-gray">
+                      Delete notification logs older than 30 days
+                    </p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowClearLogsConfirm(true)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Clear
+                  </Button>
                 </div>
-              )}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white">Clear Local Storage</p>
+                  <p className="text-sm text-bambu-gray">
+                    Clear browser cache (sidebar order, preferences)
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowClearStorageConfirm(true)}
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Clear
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
+      </div>
+      )}
 
-        {/* Fourth Column - Notifications */}
-        <div className="w-80 flex-shrink-0">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Bell className="w-5 h-5 text-bambu-green" />
-                  <h2 className="text-lg font-semibold text-white">Notifications</h2>
+      {/* Smart Plugs Tab */}
+      {activeTab === 'plugs' && (
+        <div className="max-w-4xl">
+          <div className="flex items-start justify-between mb-6">
+            <div>
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Plug className="w-5 h-5 text-bambu-green" />
+                Smart Plugs
+              </h2>
+              <p className="text-sm text-bambu-gray mt-1">
+                Connect Tasmota-based smart plugs to automate power control and track energy usage for your printers.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 pt-1 shrink-0">
+              {smartPlugs && smartPlugs.filter(p => p.enabled).length > 1 && (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="whitespace-nowrap"
+                    onClick={() => setShowBulkPlugConfirm('on')}
+                    disabled={bulkPlugActionMutation.isPending}
+                    title="Turn all plugs on"
+                  >
+                    {bulkPlugActionMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Power className="w-4 h-4 text-bambu-green" />
+                    )}
+                    All On
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="whitespace-nowrap"
+                    onClick={() => setShowBulkPlugConfirm('off')}
+                    disabled={bulkPlugActionMutation.isPending}
+                    title="Turn all plugs off"
+                  >
+                    {bulkPlugActionMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <PowerOff className="w-4 h-4 text-red-400" />
+                    )}
+                    All Off
+                  </Button>
+                </>
+              )}
+              <Button
+                className="whitespace-nowrap"
+                onClick={() => {
+                  setEditingPlug(null);
+                  setShowPlugModal(true);
+                }}
+              >
+                <Plus className="w-4 h-4" />
+                Add Smart Plug
+              </Button>
+            </div>
+          </div>
+
+          {/* Energy Summary Card */}
+          {smartPlugs && smartPlugs.length > 0 && (
+            <Card className="mb-6">
+              <CardHeader>
+                <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-yellow-400" />
+                  Energy Summary
+                  {energyLoading && (
+                    <Loader2 className="w-4 h-4 animate-spin text-bambu-gray ml-2" />
+                  )}
+                </h3>
+              </CardHeader>
+              <CardContent>
+                {plugEnergySummary ? (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {/* Current Power */}
+                    <div className="bg-bambu-dark rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-bambu-gray text-xs mb-1">
+                        <Zap className="w-3 h-3" />
+                        Current Power
+                      </div>
+                      <div className="text-xl font-bold text-white">
+                        {plugEnergySummary.totalPower.toFixed(1)}
+                        <span className="text-sm font-normal text-bambu-gray ml-1">W</span>
+                      </div>
+                      <div className="text-xs text-bambu-gray mt-1">
+                        {plugEnergySummary.reachableCount}/{plugEnergySummary.totalPlugs} plugs online
+                      </div>
+                    </div>
+
+                    {/* Today */}
+                    <div className="bg-bambu-dark rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-bambu-gray text-xs mb-1">
+                        <Calendar className="w-3 h-3" />
+                        Today
+                      </div>
+                      <div className="text-xl font-bold text-white">
+                        {plugEnergySummary.totalToday.toFixed(2)}
+                        <span className="text-sm font-normal text-bambu-gray ml-1">kWh</span>
+                      </div>
+                      {localSettings && localSettings.energy_cost_per_kwh > 0 && (
+                        <div className="text-xs text-bambu-gray mt-1">
+                          ~{(plugEnergySummary.totalToday * localSettings.energy_cost_per_kwh).toFixed(2)} {localSettings.currency}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Yesterday */}
+                    <div className="bg-bambu-dark rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-bambu-gray text-xs mb-1">
+                        <TrendingUp className="w-3 h-3" />
+                        Yesterday
+                      </div>
+                      <div className="text-xl font-bold text-white">
+                        {plugEnergySummary.totalYesterday.toFixed(2)}
+                        <span className="text-sm font-normal text-bambu-gray ml-1">kWh</span>
+                      </div>
+                      {localSettings && localSettings.energy_cost_per_kwh > 0 && (
+                        <div className="text-xs text-bambu-gray mt-1">
+                          ~{(plugEnergySummary.totalYesterday * localSettings.energy_cost_per_kwh).toFixed(2)} {localSettings.currency}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Total Lifetime */}
+                    <div className="bg-bambu-dark rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-bambu-gray text-xs mb-1">
+                        <DollarSign className="w-3 h-3" />
+                        Total
+                      </div>
+                      <div className="text-xl font-bold text-white">
+                        {plugEnergySummary.totalLifetime.toFixed(1)}
+                        <span className="text-sm font-normal text-bambu-gray ml-1">kWh</span>
+                      </div>
+                      {localSettings && localSettings.energy_cost_per_kwh > 0 && (
+                        <div className="text-xs text-bambu-gray mt-1">
+                          ~{(plugEnergySummary.totalLifetime * localSettings.energy_cost_per_kwh).toFixed(2)} {localSettings.currency}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : !energyLoading ? (
+                  <p className="text-sm text-bambu-gray">
+                    Enable plugs to see energy summary
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+
+          {plugsLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+            </div>
+          ) : smartPlugs && smartPlugs.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {smartPlugs.map((plug) => (
+                <SmartPlugCard
+                  key={plug.id}
+                  plug={plug}
+                  onEdit={(p) => {
+                    setEditingPlug(p);
+                    setShowPlugModal(true);
+                  }}
+                />
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="py-12">
+                <div className="text-center text-bambu-gray">
+                  <Plug className="w-16 h-16 mx-auto mb-4 opacity-30" />
+                  <p className="text-lg font-medium text-white mb-2">No smart plugs configured</p>
+                  <p className="text-sm mb-4">Add a Tasmota-based smart plug to track energy usage and automate power control.</p>
+                  <Button
+                    onClick={() => {
+                      setEditingPlug(null);
+                      setShowPlugModal(true);
+                    }}
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Your First Smart Plug
+                  </Button>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* Notifications Tab */}
+      {activeTab === 'notifications' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Left Column: Providers */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Bell className="w-5 h-5 text-bambu-green" />
+                Providers
+              </h2>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setShowLogViewer(true)}
+                >
+                  <History className="w-4 h-4" />
+                  Log
+                </Button>
+                {notificationProviders && notificationProviders.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setTestAllResult(null);
+                      testAllMutation.mutate();
+                    }}
+                    disabled={testAllMutation.isPending}
+                  >
+                    {testAllMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    Test All
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   onClick={() => {
@@ -584,59 +1214,166 @@ export function SettingsPage() {
                   Add
                 </Button>
               </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-bambu-gray mb-4">
-                Get notified about print events via WhatsApp, Telegram, Email, and more.
-              </p>
+            </div>
 
-              {/* Notification Language */}
-              <div className="flex items-center justify-between py-3 border-b border-bambu-dark-tertiary mb-4">
-                <div>
-                  <p className="text-white">{t('settings.notificationLanguage')}</p>
-                  <p className="text-sm text-bambu-gray">{t('settings.notificationLanguageDescription')}</p>
+            {/* Notification Language Setting */}
+            <Card className="mb-4">
+              <CardContent className="py-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white text-sm font-medium">{t('settings.notificationLanguage')}</p>
+                    <p className="text-xs text-bambu-gray">{t('settings.notificationLanguageDescription')}</p>
+                  </div>
+                  <select
+                    value={localSettings.notification_language || 'en'}
+                    onChange={(e) => updateSetting('notification_language', e.target.value)}
+                    className="px-2 py-1.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-bambu-green"
+                  >
+                    {availableLanguages.map((lang) => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.nativeName}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <select
-                  value={localSettings.notification_language || 'en'}
-                  onChange={(e) => updateSetting('notification_language', e.target.value)}
-                  className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-bambu-green"
-                >
-                  {availableLanguages.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.nativeName}
-                    </option>
-                  ))}
-                </select>
+              </CardContent>
+            </Card>
+
+            {/* Test All Results */}
+            {testAllResult && (
+              <Card className="mb-4">
+                <CardContent className="py-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-white">Test Results</span>
+                    <button
+                      onClick={() => setTestAllResult(null)}
+                      className="text-bambu-gray hover:text-white text-xs"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-4 text-sm mb-2">
+                    <span className="flex items-center gap-1 text-bambu-green">
+                      <CheckCircle className="w-4 h-4" />
+                      {testAllResult.success} passed
+                    </span>
+                    {testAllResult.failed > 0 && (
+                      <span className="flex items-center gap-1 text-red-400">
+                        <XCircle className="w-4 h-4" />
+                        {testAllResult.failed} failed
+                      </span>
+                    )}
+                  </div>
+                  {testAllResult.results.filter(r => !r.success).length > 0 && (
+                    <div className="space-y-1 mt-2 pt-2 border-t border-bambu-dark-tertiary">
+                      {testAllResult.results.filter(r => !r.success).map((result) => (
+                        <div key={result.provider_id} className="text-xs text-red-400">
+                          <span className="font-medium">{result.provider_name}:</span> {result.message}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {providersLoading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
               </div>
-
-              {providersLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
-                </div>
-              ) : notificationProviders && notificationProviders.length > 0 ? (
-                <div className="space-y-4">
-                  {notificationProviders.map((provider) => (
-                    <NotificationProviderCard
-                      key={provider.id}
-                      provider={provider}
-                      onEdit={(p) => {
-                        setEditingProvider(p);
+            ) : notificationProviders && notificationProviders.length > 0 ? (
+              <div className="space-y-3">
+                {notificationProviders.map((provider) => (
+                  <NotificationProviderCard
+                    key={provider.id}
+                    provider={provider}
+                    onEdit={(p) => {
+                      setEditingProvider(p);
+                      setShowNotificationModal(true);
+                    }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="py-8">
+                  <div className="text-center text-bambu-gray">
+                    <Bell className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm font-medium text-white mb-2">No providers configured</p>
+                    <p className="text-xs mb-3">Add a provider to receive alerts.</p>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setEditingProvider(null);
                         setShowNotificationModal(true);
                       }}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-bambu-gray">
-                  <Bell className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                  <p>No notification providers configured</p>
-                  <p className="text-sm mt-1">Add a provider to get started</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Provider
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Right Column: Templates */}
+          <div>
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+              <FileText className="w-5 h-5 text-bambu-green" />
+              Message Templates
+            </h2>
+            <p className="text-sm text-bambu-gray mb-4">
+              Customize notification messages for each event.
+            </p>
+
+            {templatesLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+              </div>
+            ) : notificationTemplates && notificationTemplates.length > 0 ? (
+              <div className="space-y-2">
+                {notificationTemplates.map((template) => (
+                  <Card
+                    key={template.id}
+                    className="cursor-pointer hover:border-bambu-green/50 transition-colors"
+                    onClick={() => setEditingTemplate(template)}
+                  >
+                    <CardContent className="py-2.5 px-3">
+                      <div className="flex items-center justify-between">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-white font-medium text-sm truncate">{template.name}</p>
+                          <p className="text-bambu-gray text-xs truncate mt-0.5">
+                            {template.title_template}
+                          </p>
+                        </div>
+                        <button
+                          className="p-1.5 hover:bg-bambu-dark-tertiary rounded transition-colors shrink-0 ml-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTemplate(template);
+                          }}
+                        >
+                          <Edit2 className="w-4 h-4 text-bambu-gray" />
+                        </button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="py-8">
+                  <div className="text-center text-bambu-gray">
+                    <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">No templates available. Restart the backend to seed default templates.</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Smart Plug Modal */}
       {showPlugModal && (
@@ -657,6 +1394,74 @@ export function SettingsPage() {
             setShowNotificationModal(false);
             setEditingProvider(null);
           }}
+        />
+      )}
+
+      {/* Template Editor Modal */}
+      {editingTemplate && (
+        <NotificationTemplateEditor
+          template={editingTemplate}
+          onClose={() => setEditingTemplate(null)}
+        />
+      )}
+
+      {/* Notification Log Viewer */}
+      {showLogViewer && (
+        <NotificationLogViewer
+          onClose={() => setShowLogViewer(false)}
+        />
+      )}
+
+      {/* Confirm Modal: Clear Notification Logs */}
+      {showClearLogsConfirm && (
+        <ConfirmModal
+          title="Clear Notification Logs"
+          message="This will permanently delete all notification logs older than 30 days. This action cannot be undone."
+          confirmText="Clear Logs"
+          variant="warning"
+          onConfirm={async () => {
+            setShowClearLogsConfirm(false);
+            try {
+              const result = await api.clearNotificationLogs(30);
+              showToast(result.message, 'success');
+            } catch {
+              showToast('Failed to clear logs', 'error');
+            }
+          }}
+          onCancel={() => setShowClearLogsConfirm(false)}
+        />
+      )}
+
+      {/* Confirm Modal: Clear Local Storage */}
+      {showClearStorageConfirm && (
+        <ConfirmModal
+          title="Clear All Local Storage"
+          message="WARNING: This will clear ALL browser data for Bambusy including your sidebar order, preferences, and cached data. The page will reload after clearing. This action cannot be undone!"
+          confirmText="Clear Everything"
+          variant="danger"
+          onConfirm={() => {
+            setShowClearStorageConfirm(false);
+            localStorage.clear();
+            showToast('Local storage cleared. Refreshing...', 'success');
+            setTimeout(() => window.location.reload(), 1000);
+          }}
+          onCancel={() => setShowClearStorageConfirm(false)}
+        />
+      )}
+
+      {/* Confirm Modal: Bulk Plug Action */}
+      {showBulkPlugConfirm && (
+        <ConfirmModal
+          title={`Turn All Plugs ${showBulkPlugConfirm === 'on' ? 'On' : 'Off'}`}
+          message={`This will turn ${showBulkPlugConfirm === 'on' ? 'ON' : 'OFF'} all ${smartPlugs?.filter(p => p.enabled).length || 0} enabled smart plugs. ${showBulkPlugConfirm === 'off' ? 'Any running printers may be affected!' : ''}`}
+          confirmText={`Turn All ${showBulkPlugConfirm === 'on' ? 'On' : 'Off'}`}
+          variant={showBulkPlugConfirm === 'off' ? 'danger' : 'warning'}
+          onConfirm={() => {
+            const action = showBulkPlugConfirm;
+            setShowBulkPlugConfirm(null);
+            bulkPlugActionMutation.mutate(action);
+          }}
+          onCancel={() => setShowBulkPlugConfirm(null)}
         />
       )}
     </div>

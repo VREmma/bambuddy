@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { Plug, Power, PowerOff, Loader2, Trash2, Settings2, Thermometer, Clock, Wifi, WifiOff, Edit2 } from 'lucide-react';
+import { Plug, Power, PowerOff, Loader2, Trash2, Settings2, Thermometer, Clock, Wifi, WifiOff, Edit2, Bell, Calendar } from 'lucide-react';
 import { api } from '../api/client';
 import type { SmartPlug, SmartPlugUpdate } from '../api/client';
 import { Card, CardContent } from './Card';
@@ -105,6 +105,28 @@ export function SmartPlugCard({ plug, onEdit }: SmartPlugCardProps) {
             <div className="mb-3 px-2 py-1.5 bg-bambu-dark rounded-lg">
               <span className="text-xs text-bambu-gray">Linked to: </span>
               <span className="text-sm text-white">{linkedPrinter.name}</span>
+            </div>
+          )}
+
+          {/* Feature Badges */}
+          {(plug.power_alert_enabled || plug.schedule_enabled) && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {plug.power_alert_enabled && (
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded-full">
+                  <Bell className="w-3 h-3" />
+                  Alerts
+                </span>
+              )}
+              {plug.schedule_enabled && (
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded-full">
+                  <Calendar className="w-3 h-3" />
+                  {plug.schedule_on_time && plug.schedule_off_time
+                    ? `${plug.schedule_on_time} - ${plug.schedule_off_time}`
+                    : plug.schedule_on_time
+                      ? `On ${plug.schedule_on_time}`
+                      : `Off ${plug.schedule_off_time}`}
+                </span>
+              )}
             </div>
           )}
 

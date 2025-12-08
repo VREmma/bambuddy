@@ -573,8 +573,10 @@ class ArchiveService:
                 name_conditions.append(PrintArchive.print_name.ilike(print_name))
             if makerworld_model_id:
                 # Match by MakerWorld model ID stored in extra_data
+                # Use json_extract for SQLite compatibility (astext is PostgreSQL-only)
+                from sqlalchemy import func, cast, String
                 name_conditions.append(
-                    PrintArchive.extra_data["makerworld_model_id"].astext == makerworld_model_id
+                    func.json_extract(PrintArchive.extra_data, '$.makerworld_model_id') == str(makerworld_model_id)
                 )
 
             if name_conditions:
