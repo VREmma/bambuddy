@@ -359,7 +359,7 @@ export function Layout() {
                         <img
                           src={`/api/v1/external-links/${link.id}/icon`}
                           alt=""
-                          className={`w-5 h-5 flex-shrink-0 ${theme === 'dark' ? 'invert brightness-200' : ''}`}
+                          className={`w-5 h-5 flex-shrink-0 ${theme === 'dark' ? 'invert opacity-[0.65]' : 'opacity-60'}`}
                         />
                       ) : (
                         LinkIcon && <LinkIcon className="w-5 h-5 flex-shrink-0" />
