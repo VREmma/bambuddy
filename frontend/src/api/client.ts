@@ -1149,21 +1149,49 @@ export const api = {
     }),
   resetSettings: () =>
     request<AppSettings>('/settings/reset', { method: 'POST' }),
-  exportBackup: async () => {
-    const response = await fetch(`${API_BASE}/settings/backup`);
-    return response.json();
+  exportBackup: async (categories?: Record<string, boolean>): Promise<{ blob: Blob; filename: string }> => {
+    const params = new URLSearchParams();
+    if (categories) {
+      if (categories.settings !== undefined) params.set('include_settings', String(categories.settings));
+      if (categories.notifications !== undefined) params.set('include_notifications', String(categories.notifications));
+      if (categories.templates !== undefined) params.set('include_templates', String(categories.templates));
+      if (categories.smart_plugs !== undefined) params.set('include_smart_plugs', String(categories.smart_plugs));
+      if (categories.printers !== undefined) params.set('include_printers', String(categories.printers));
+      if (categories.filaments !== undefined) params.set('include_filaments', String(categories.filaments));
+      if (categories.maintenance !== undefined) params.set('include_maintenance', String(categories.maintenance));
+      if (categories.archives !== undefined) params.set('include_archives', String(categories.archives));
+      if (categories.access_codes !== undefined) params.set('include_access_codes', String(categories.access_codes));
+    }
+    const url = `${API_BASE}/settings/backup${params.toString() ? '?' + params.toString() : ''}`;
+    const response = await fetch(url);
+
+    // Get filename from Content-Disposition header
+    const contentDisposition = response.headers.get('Content-Disposition');
+    let filename = 'bambuddy-backup.json';
+    if (contentDisposition) {
+      const match = contentDisposition.match(/filename=([^;]+)/);
+      if (match) filename = match[1].trim();
+    }
+
+    const blob = await response.blob();
+    return { blob, filename };
   },
-  importBackup: async (file: File) => {
+  importBackup: async (file: File, overwrite = false) => {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await fetch(`${API_BASE}/settings/restore`, {
+    const url = `${API_BASE}/settings/restore${overwrite ? '?overwrite=true' : ''}`;
+    const response = await fetch(url, {
       method: 'POST',
       body: formData,
     });
     return response.json() as Promise<{
       success: boolean;
       message: string;
-      restored?: { settings: number; notification_providers: number; smart_plugs: number };
+      restored?: Record<string, number>;
+      skipped?: Record<string, number>;
+      skipped_details?: Record<string, string[]>;
+      files_restored?: number;
+      total_skipped?: number;
     }>;
   },
   checkFfmpeg: () =>

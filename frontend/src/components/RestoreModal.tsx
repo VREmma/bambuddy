@@ -1,0 +1,370 @@
+import { useState, useRef, useEffect } from 'react';
+import { Upload, X, AlertTriangle, CheckCircle, SkipForward, RefreshCw, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Card, CardContent } from './Card';
+import { Button } from './Button';
+import { Toggle } from './Toggle';
+
+interface RestoreResult {
+  success: boolean;
+  message: string;
+  restored?: Record<string, number>;
+  skipped?: Record<string, number>;
+  skipped_details?: Record<string, string[]>;
+  files_restored?: number;
+  total_skipped?: number;
+}
+
+interface RestoreModalProps {
+  onClose: () => void;
+  onRestore: (file: File, overwrite: boolean) => Promise<RestoreResult>;
+  onSuccess: () => void;
+}
+
+type ModalState = 'options' | 'restoring' | 'result';
+
+const CATEGORY_LABELS: Record<string, string> = {
+  settings: 'Settings',
+  notification_providers: 'Notification Providers',
+  notification_templates: 'Notification Templates',
+  smart_plugs: 'Smart Plugs',
+  printers: 'Printers',
+  filaments: 'Filaments',
+  maintenance_types: 'Maintenance Types',
+  archives: 'Archives',
+};
+
+export function RestoreModal({ onClose, onRestore, onSuccess }: RestoreModalProps) {
+  const [state, setState] = useState<ModalState>('options');
+  const [overwrite, setOverwrite] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [result, setResult] = useState<RestoreResult | null>(null);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && state !== 'restoring') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, state]);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!selectedFile) return;
+
+    setState('restoring');
+    try {
+      const restoreResult = await onRestore(selectedFile, overwrite);
+      setResult(restoreResult);
+      setState('result');
+      if (restoreResult.success) {
+        onSuccess();
+      }
+    } catch {
+      setResult({
+        success: false,
+        message: 'Failed to restore backup. Please check the file format.',
+      });
+      setState('result');
+    }
+  };
+
+  const toggleCategory = (category: string) => {
+    setExpandedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
+  };
+
+  const totalRestored = result?.restored
+    ? Object.values(result.restored).reduce((a, b) => a + b, 0) + (result.files_restored || 0)
+    : 0;
+  const totalSkipped = result?.total_skipped || 0;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onMouseDown={(e) => {
+        // Only close if clicking directly on the backdrop, not on children
+        if (e.target === e.currentTarget && state !== 'restoring') {
+          onClose();
+        }
+      }}
+    >
+      <Card className="w-full max-w-lg">
+        <CardContent className="p-0">
+          {/* Header */}
+          <div className="flex items-center justify-between p-4 border-b border-bambu-dark-tertiary">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-full ${
+                state === 'result' && result?.success
+                  ? 'bg-bambu-green/20 text-bambu-green'
+                  : state === 'result' && !result?.success
+                  ? 'bg-red-500/20 text-red-500'
+                  : 'bg-blue-500/20 text-blue-500'
+              }`}>
+                {state === 'result' && result?.success ? (
+                  <CheckCircle className="w-5 h-5" />
+                ) : state === 'result' && !result?.success ? (
+                  <AlertTriangle className="w-5 h-5" />
+                ) : (
+                  <Upload className="w-5 h-5" />
+                )}
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">
+                  {state === 'options' && 'Restore Backup'}
+                  {state === 'restoring' && 'Restoring...'}
+                  {state === 'result' && (result?.success ? 'Restore Complete' : 'Restore Failed')}
+                </h3>
+                <p className="text-sm text-bambu-gray">
+                  {state === 'options' && 'Import settings from a backup file'}
+                  {state === 'restoring' && 'Please wait while your data is being restored'}
+                  {state === 'result' && result?.message}
+                </p>
+              </div>
+            </div>
+            {state !== 'restoring' && (
+              <button
+                onClick={onClose}
+                className="p-2 hover:bg-bambu-dark-tertiary rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+
+          {/* Options State */}
+          {state === 'options' && (
+            <>
+              <div className="p-4 space-y-4">
+                {/* File Selection */}
+                <div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json,.zip"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`w-full p-4 border-2 border-dashed rounded-lg transition-colors ${
+                      selectedFile
+                        ? 'border-bambu-green bg-bambu-green/10'
+                        : 'border-bambu-dark-tertiary hover:border-bambu-gray'
+                    }`}
+                  >
+                    {selectedFile ? (
+                      <div className="flex items-center justify-center gap-2 text-bambu-green">
+                        <CheckCircle className="w-5 h-5" />
+                        <span className="font-medium">{selectedFile.name}</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-bambu-gray">
+                        <Upload className="w-8 h-8" />
+                        <span>Click to select backup file (.json or .zip)</span>
+                      </div>
+                    )}
+                  </button>
+                </div>
+
+                {/* Info Box */}
+                <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/30">
+                  <div className="flex items-start gap-2 text-sm">
+                    <AlertTriangle className="w-4 h-4 text-blue-500 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                    <div className="text-blue-700 dark:text-blue-200">
+                      <p className="font-medium mb-1">How duplicate handling works:</p>
+                      <ul className="text-blue-600 dark:text-blue-200/80 space-y-1 text-xs">
+                        <li><strong>Printers</strong> - matched by serial number</li>
+                        <li><strong>Smart Plugs</strong> - matched by IP address</li>
+                        <li><strong>Notification Providers</strong> - matched by name</li>
+                        <li><strong>Filaments</strong> - matched by name + type + brand</li>
+                        <li><strong>Archives</strong> - matched by content hash (always skipped)</li>
+                        <li><strong>Settings & Templates</strong> - always overwritten</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Overwrite Toggle */}
+                <div className="p-3 rounded-lg bg-bambu-dark border border-bambu-dark-tertiary">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-white font-medium flex items-center gap-2">
+                        {overwrite ? (
+                          <RefreshCw className="w-4 h-4 text-orange-400" />
+                        ) : (
+                          <SkipForward className="w-4 h-4 text-bambu-gray" />
+                        )}
+                        {overwrite ? 'Replace existing data' : 'Keep existing data'}
+                      </p>
+                      <p className="text-sm text-bambu-gray mt-1">
+                        {overwrite
+                          ? 'Overwrite items that already exist with backup data'
+                          : 'Only restore items that don\'t already exist'}
+                      </p>
+                    </div>
+                    <Toggle checked={overwrite} onChange={setOverwrite} />
+                  </div>
+                </div>
+
+                {overwrite && (
+                  <div className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/30">
+                    <div className="flex items-start gap-2 text-sm">
+                      <AlertTriangle className="w-4 h-4 text-orange-500 dark:text-orange-400 mt-0.5 flex-shrink-0" />
+                      <div className="text-orange-700 dark:text-orange-200">
+                        <span className="font-medium">Caution:</span> Overwriting will replace your current configurations with data from the backup. Printer access codes are never overwritten for security.
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-3 p-4 border-t border-bambu-dark-tertiary">
+                <Button type="button" variant="secondary" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleRestore}
+                  disabled={!selectedFile}
+                  className="bg-bambu-green hover:bg-bambu-green-dark disabled:opacity-50"
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Restore
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* Restoring State */}
+          {state === 'restoring' && (
+            <div className="p-8 flex flex-col items-center gap-4">
+              <Loader2 className="w-12 h-12 text-bambu-green animate-spin" />
+              <p className="text-bambu-gray">Processing backup file...</p>
+            </div>
+          )}
+
+          {/* Result State */}
+          {state === 'result' && result && (
+            <>
+              <div className="p-4 space-y-4 max-h-[400px] overflow-y-auto">
+                {/* Summary */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-bambu-green/10 border border-bambu-green/30">
+                    <div className="text-2xl font-bold text-bambu-green">{totalRestored}</div>
+                    <div className="text-sm text-bambu-gray">Items Restored</div>
+                  </div>
+                  <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+                    <div className="text-2xl font-bold text-yellow-500">{totalSkipped}</div>
+                    <div className="text-sm text-bambu-gray">Items Skipped</div>
+                  </div>
+                </div>
+
+                {/* Restored Details */}
+                {result.restored && Object.entries(result.restored).some(([, count]) => count > 0) && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-bambu-gray flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-bambu-green" />
+                      Restored
+                    </h4>
+                    <div className="space-y-1">
+                      {Object.entries(result.restored)
+                        .filter(([, count]) => count > 0)
+                        .map(([key, count]) => (
+                          <div key={key} className="flex items-center justify-between text-sm p-2 rounded bg-bambu-dark">
+                            <span className="text-white">{CATEGORY_LABELS[key] || key}</span>
+                            <span className="text-bambu-green font-medium">{count}</span>
+                          </div>
+                        ))}
+                      {(result.files_restored || 0) > 0 && (
+                        <div className="flex items-center justify-between text-sm p-2 rounded bg-bambu-dark">
+                          <span className="text-white">Files (3MF, thumbnails, etc.)</span>
+                          <span className="text-bambu-green font-medium">{result.files_restored}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Skipped Details */}
+                {result.skipped && Object.entries(result.skipped).some(([, count]) => count > 0) && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-bambu-gray flex items-center gap-2">
+                      <SkipForward className="w-4 h-4 text-yellow-500" />
+                      Skipped (already exist)
+                    </h4>
+                    <div className="space-y-1">
+                      {Object.entries(result.skipped)
+                        .filter(([, count]) => count > 0)
+                        .map(([key, count]) => {
+                          const details = result.skipped_details?.[key] || [];
+                          const isExpanded = expandedCategories.has(key);
+                          return (
+                            <div key={key}>
+                              <button
+                                onClick={() => details.length > 0 && toggleCategory(key)}
+                                className={`w-full flex items-center justify-between text-sm p-2 rounded bg-bambu-dark ${
+                                  details.length > 0 ? 'hover:bg-bambu-dark-tertiary cursor-pointer' : ''
+                                }`}
+                              >
+                                <span className="text-white flex items-center gap-2">
+                                  {CATEGORY_LABELS[key] || key}
+                                  {details.length > 0 && (
+                                    isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                                  )}
+                                </span>
+                                <span className="text-yellow-500 font-medium">{count}</span>
+                              </button>
+                              {isExpanded && details.length > 0 && (
+                                <div className="mt-1 ml-4 p-2 rounded bg-bambu-dark-tertiary text-xs text-bambu-gray space-y-1">
+                                  {details.slice(0, 10).map((item, i) => (
+                                    <div key={i}>{item}</div>
+                                  ))}
+                                  {details.length > 10 && (
+                                    <div className="text-bambu-gray/60">...and {details.length - 10} more</div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+
+                {totalRestored === 0 && totalSkipped === 0 && (
+                  <div className="p-4 text-center text-bambu-gray">
+                    No data was found to restore in the backup file.
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-3 p-4 border-t border-bambu-dark-tertiary">
+                <Button onClick={onClose}>
+                  Close
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

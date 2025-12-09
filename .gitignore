@@ -43,3 +43,4 @@ archive/
 *.log
 logs/
 *.log*
+bambutrack.log.*

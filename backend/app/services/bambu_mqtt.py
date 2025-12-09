@@ -278,6 +278,27 @@ class BambuMQTTClient:
     def topic_publish(self) -> str:
         return f"device/{self.serial_number}/request"
 
+    # Maximum time (seconds) without a message before considering connection stale
+    STALE_TIMEOUT = 60.0
+
+    def is_stale(self) -> bool:
+        """Check if the connection is stale (no messages for too long)."""
+        if self._last_message_time == 0:
+            return False  # Never received a message yet
+        time_since_last = time.time() - self._last_message_time
+        return time_since_last > self.STALE_TIMEOUT
+
+    def check_staleness(self) -> bool:
+        """Check staleness and update connected state if stale. Returns True if connected."""
+        if self.state.connected and self.is_stale():
+            logger.warning(
+                f"[{self.serial_number}] Connection stale - no message for {time.time() - self._last_message_time:.1f}s"
+            )
+            self.state.connected = False
+            if self.on_state_change:
+                self.on_state_change(self.state)
+        return self.state.connected
+
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             self.state.connected = True
@@ -1481,7 +1502,7 @@ class BambuMQTTClient:
         self._loop = loop
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-            client_id=f"bambutrack_{self.serial_number}",
+            client_id=f"bambuddy_{self.serial_number}",
             protocol=mqtt.MQTTv311,
         )
 

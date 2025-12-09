@@ -2,7 +2,8 @@
 
 import asyncio
 import logging
-import subprocess
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -25,6 +26,30 @@ _update_status = {
     "message": "",
     "error": None,
 }
+
+
+def _find_executable(name: str) -> str | None:
+    """Find an executable in PATH or common locations."""
+    # Try standard PATH first
+    path = shutil.which(name)
+    if path:
+        return path
+
+    # Common locations for executables (useful when running as systemd service)
+    common_paths = [
+        f"/usr/bin/{name}",
+        f"/usr/local/bin/{name}",
+        f"/opt/homebrew/bin/{name}",
+        f"/home/linuxbrew/.linuxbrew/bin/{name}",
+        f"{os.path.expanduser('~')}/.nvm/current/bin/{name}",
+        f"{os.path.expanduser('~')}/.local/bin/{name}",
+    ]
+
+    for p in common_paths:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+
+    return None
 
 
 def parse_version(version: str) -> tuple[int, ...]:
@@ -140,21 +165,55 @@ async def check_for_updates(db: AsyncSession = Depends(get_db)):
 
 
 async def _perform_update():
-    """Perform the actual update using git pull."""
+    """Perform the actual update using git fetch and reset."""
     global _update_status
 
     try:
+        base_dir = settings.base_dir
+
+        # Find git executable (may not be in PATH when running as systemd service)
+        git_path = _find_executable("git")
+        if not git_path:
+            _update_status = {
+                "status": "error",
+                "progress": 0,
+                "message": "Git not found",
+                "error": "Could not find git executable. Please ensure git is installed.",
+            }
+            return
+
+        logger.info(f"Using git at: {git_path}")
+
+        # Git config to avoid safe.directory issues
+        git_config = ["-c", f"safe.directory={base_dir}"]
+
         _update_status = {
             "status": "downloading",
-            "progress": 20,
-            "message": "Pulling latest changes...",
+            "progress": 10,
+            "message": "Configuring git...",
             "error": None,
         }
 
-        # Run git pull in the project directory
-        base_dir = settings.base_dir
+        # Ensure remote uses HTTPS (SSH may not be available)
+        https_url = f"https://github.com/{GITHUB_REPO}.git"
         process = await asyncio.create_subprocess_exec(
-            "git", "pull", "--rebase",
+            git_path, *git_config, "remote", "set-url", "origin", https_url,
+            cwd=str(base_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await process.communicate()
+
+        _update_status = {
+            "status": "downloading",
+            "progress": 20,
+            "message": "Fetching latest changes...",
+            "error": None,
+        }
+
+        # Fetch from origin
+        process = await asyncio.create_subprocess_exec(
+            git_path, *git_config, "fetch", "origin", "main",
             cwd=str(base_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -162,12 +221,39 @@ async def _perform_update():
         stdout, stderr = await process.communicate()
 
         if process.returncode != 0:
-            error_msg = stderr.decode() if stderr else "Git pull failed"
-            logger.error(f"Git pull failed: {error_msg}")
+            error_msg = stderr.decode() if stderr else "Git fetch failed"
+            logger.error(f"Git fetch failed: {error_msg}")
             _update_status = {
                 "status": "error",
                 "progress": 0,
-                "message": "Failed to pull updates",
+                "message": "Failed to fetch updates",
+                "error": error_msg,
+            }
+            return
+
+        _update_status = {
+            "status": "downloading",
+            "progress": 40,
+            "message": "Applying updates...",
+            "error": None,
+        }
+
+        # Hard reset to origin/main (clean update, no merge conflicts)
+        process = await asyncio.create_subprocess_exec(
+            git_path, *git_config, "reset", "--hard", "origin/main",
+            cwd=str(base_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            error_msg = stderr.decode() if stderr else "Git reset failed"
+            logger.error(f"Git reset failed: {error_msg}")
+            _update_status = {
+                "status": "error",
+                "progress": 0,
+                "message": "Failed to apply updates",
                 "error": error_msg,
             }
             return
@@ -191,19 +277,21 @@ async def _perform_update():
         if process.returncode != 0:
             logger.warning(f"pip install warning: {stderr.decode() if stderr else 'unknown'}")
 
-        _update_status = {
-            "status": "installing",
-            "progress": 70,
-            "message": "Building frontend...",
-            "error": None,
-        }
-
-        # Build frontend
+        # Try to build frontend if npm is available (optional - static files are pre-built)
+        npm_path = _find_executable("npm")
         frontend_dir = base_dir / "frontend"
-        if frontend_dir.exists():
+
+        if npm_path and frontend_dir.exists():
+            _update_status = {
+                "status": "installing",
+                "progress": 70,
+                "message": "Building frontend...",
+                "error": None,
+            }
+
             # npm install
             process = await asyncio.create_subprocess_exec(
-                "npm", "install",
+                npm_path, "install",
                 cwd=str(frontend_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -212,7 +300,7 @@ async def _perform_update():
 
             # npm run build
             process = await asyncio.create_subprocess_exec(
-                "npm", "run", "build",
+                npm_path, "run", "build",
                 cwd=str(frontend_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -221,6 +309,8 @@ async def _perform_update():
 
             if process.returncode != 0:
                 logger.warning(f"Frontend build warning: {stderr.decode() if stderr else 'unknown'}")
+        else:
+            logger.info("npm not found or frontend dir missing - using pre-built static files")
 
         _update_status = {
             "status": "complete",

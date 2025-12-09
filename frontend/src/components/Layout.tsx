@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Printer, Archive, Calendar, BarChart3, Cloud, Settings, Sun, Moon, ChevronLeft, ChevronRight, Keyboard, Github, GripVertical, ArrowUpCircle, Wrench, type LucideIcon } from 'lucide-react';
+import { Printer, Archive, Calendar, BarChart3, Cloud, Settings, Sun, Moon, ChevronLeft, ChevronRight, Keyboard, Github, GripVertical, ArrowUpCircle, Wrench, X, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
@@ -80,6 +80,9 @@ export function Layout() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const hasRedirected = useRef(false);
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() =>
+    sessionStorage.getItem('dismissedUpdateVersion')
+  );
 
   // Check for updates
   const { data: versionInfo } = useQuery({
@@ -101,6 +104,18 @@ export function Layout() {
     staleTime: 60 * 60 * 1000, // 1 hour
     refetchInterval: 60 * 60 * 1000, // Check every hour
   });
+
+  // Show update banner if update available and not dismissed for this version
+  const showUpdateBanner = updateCheck?.update_available &&
+    updateCheck.latest_version &&
+    updateCheck.latest_version !== dismissedUpdateVersion;
+
+  const dismissUpdateBanner = () => {
+    if (updateCheck?.latest_version) {
+      sessionStorage.setItem('dismissedUpdateVersion', updateCheck.latest_version);
+      setDismissedUpdateVersion(updateCheck.latest_version);
+    }
+  };
 
   // Redirect to default view on initial load
   useEffect(() => {
@@ -200,8 +215,8 @@ export function Layout() {
         {/* Logo */}
         <div className={`border-b border-bambu-dark-tertiary flex items-center justify-center ${sidebarExpanded ? 'p-4' : 'p-2'}`}>
           <img
-            src={theme === 'dark' ? '/img/bambusy_logo_dark.png' : '/img/bambusy_logo_light.png'}
-            alt="Bambusy"
+            src={theme === 'dark' ? '/img/bambuddy_logo_dark.png' : '/img/bambuddy_logo_light.png'}
+            alt="Bambuddy"
             className={sidebarExpanded ? 'h-16 w-auto' : 'h-8 w-8 object-cover object-left'}
           />
         </div>
@@ -280,7 +295,7 @@ export function Layout() {
               </div>
               <div className="flex items-center gap-1">
                 <a
-                  href="https://github.com/maziggy/bambusy"
+                  href="https://github.com/maziggy/bambuddy"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
@@ -316,7 +331,7 @@ export function Layout() {
                 </button>
               )}
               <a
-                href="https://github.com/maziggy/bambusy"
+                href="https://github.com/maziggy/bambuddy"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
@@ -345,6 +360,33 @@ export function Layout() {
 
       {/* Main content */}
       <main className={`flex-1 bg-bambu-dark overflow-auto ${sidebarExpanded ? 'ml-64' : 'ml-16'} transition-all duration-300`}>
+        {/* Persistent update banner */}
+        {showUpdateBanner && (
+          <div className="bg-bambu-green/20 border-b border-bambu-green/30 px-4 py-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm">
+              <ArrowUpCircle className="w-4 h-4 text-bambu-green" />
+              <span>
+                {t('nav.updateAvailableBanner', {
+                  version: updateCheck?.latest_version,
+                  defaultValue: `Version ${updateCheck?.latest_version} is available!`
+                })}
+              </span>
+              <button
+                onClick={() => navigate('/settings')}
+                className="text-bambu-green hover:text-bambu-green/80 font-medium underline"
+              >
+                {t('nav.viewUpdate', { defaultValue: 'View update' })}
+              </button>
+            </div>
+            <button
+              onClick={dismissUpdateBanner}
+              className="p-1 hover:bg-bambu-dark-tertiary rounded transition-colors"
+              title={t('common.dismiss', { defaultValue: 'Dismiss' })}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         <Outlet />
       </main>
 

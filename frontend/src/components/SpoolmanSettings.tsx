@@ -37,9 +37,9 @@ export function SpoolmanSettings() {
   const [localEnabled, setLocalEnabled] = useState(false);
   const [localUrl, setLocalUrl] = useState('');
   const [localSyncMode, setLocalSyncMode] = useState('auto');
-  const [hasChanges, setHasChanges] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
   const [selectedPrinterId, setSelectedPrinterId] = useState<number | 'all'>('all');
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Fetch Spoolman settings
   const { data: settings, isLoading: settingsLoading } = useQuery({
@@ -66,19 +66,26 @@ export function SpoolmanSettings() {
       setLocalEnabled(settings.spoolman_enabled === 'true');
       setLocalUrl(settings.spoolman_url || '');
       setLocalSyncMode(settings.spoolman_sync_mode || 'auto');
+      setIsInitialized(true);
     }
   }, [settings]);
 
-  // Track changes
+  // Auto-save when settings change (after initial load)
   useEffect(() => {
-    if (settings) {
-      const changed =
-        (settings.spoolman_enabled === 'true') !== localEnabled ||
-        (settings.spoolman_url || '') !== localUrl ||
-        (settings.spoolman_sync_mode || 'auto') !== localSyncMode;
-      setHasChanges(changed);
+    if (!isInitialized || !settings) return;
+
+    const hasChanges =
+      (settings.spoolman_enabled === 'true') !== localEnabled ||
+      (settings.spoolman_url || '') !== localUrl ||
+      (settings.spoolman_sync_mode || 'auto') !== localSyncMode;
+
+    if (hasChanges) {
+      const timeoutId = setTimeout(() => {
+        saveMutation.mutate();
+      }, 500);
+      return () => clearTimeout(timeoutId);
     }
-  }, [settings, localEnabled, localUrl, localSyncMode]);
+  }, [localEnabled, localUrl, localSyncMode, isInitialized]);
 
   // Save mutation
   const saveMutation = useMutation({
@@ -91,7 +98,6 @@ export function SpoolmanSettings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['spoolman-settings'] });
       queryClient.invalidateQueries({ queryKey: ['spoolman-status'] });
-      setHasChanges(false);
       setShowSaved(true);
       setTimeout(() => setShowSaved(false), 2000);
     },
@@ -173,20 +179,11 @@ export function SpoolmanSettings() {
             <Database className="w-5 h-5 text-bambu-green" />
             <h2 className="text-lg font-semibold text-white">Spoolman Integration</h2>
           </div>
-          {hasChanges && (
-            <Button
-              size="sm"
-              onClick={() => saveMutation.mutate()}
-              disabled={saveMutation.isPending}
-            >
-              {saveMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : showSaved ? (
-                <Check className="w-4 h-4" />
-              ) : (
-                'Save'
-              )}
-            </Button>
+          {saveMutation.isPending && (
+            <Loader2 className="w-4 h-4 text-bambu-green animate-spin" />
+          )}
+          {showSaved && (
+            <Check className="w-4 h-4 text-bambu-green" />
           )}
         </div>
       </CardHeader>
