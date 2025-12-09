@@ -504,18 +504,6 @@ async def import_backup(
         "archives": [],
     }
 
-    # Log what's in the backup
-    import logging
-    restore_logger = logging.getLogger(__name__)
-    restore_logger.info(f"Restore: Backup version={backup.get('version')}, included={backup.get('included', [])}")
-    restore_logger.info(f"Restore: overwrite={overwrite}")
-    if "printers" in backup:
-        restore_logger.info(f"Restore: Backup contains {len(backup['printers'])} printers")
-        for p in backup["printers"]:
-            restore_logger.info(f"  - {p.get('name')}: access_code={'YES' if p.get('access_code') else 'NO'}, is_active={p.get('is_active')}")
-    else:
-        restore_logger.info("Restore: Backup does NOT contain printers")
-
     # Restore settings (always overwrites)
     if "settings" in backup:
         for key, value in backup["settings"].items():
@@ -665,19 +653,13 @@ async def import_backup(
                 restored["smart_plugs"] += 1
 
     # Restore printers (skip or overwrite duplicates by serial_number)
-    import logging
-    logger = logging.getLogger(__name__)
-
     if "printers" in backup:
-        logger.info(f"Restore: Processing {len(backup['printers'])} printers from backup")
         for printer_data in backup["printers"]:
-            logger.info(f"Restore: Processing printer {printer_data.get('name')} (serial: {printer_data.get('serial_number')})")
             result = await db.execute(
                 select(Printer).where(Printer.serial_number == printer_data["serial_number"])
             )
             existing = result.scalar_one_or_none()
             if existing:
-                logger.info(f"Restore: Printer already exists (id={existing.id}, is_active={existing.is_active})")
                 if overwrite:
                     existing.name = printer_data["name"]
                     existing.ip_address = printer_data["ip_address"]
@@ -695,14 +677,11 @@ async def import_backup(
                         if isinstance(is_active_val, str):
                             is_active_val = is_active_val.lower() == "true"
                         existing.is_active = is_active_val
-                        logger.info(f"Restore: Updated access_code and is_active={is_active_val} from backup")
 
                     restored["printers"] += 1
-                    logger.info(f"Restore: Updated existing printer (overwrite=True)")
                 else:
                     skipped["printers"] += 1
                     skipped_details["printers"].append(f"{printer_data['name']} ({printer_data['serial_number']})")
-                    logger.info(f"Restore: Skipped existing printer (overwrite=False)")
             else:
                 # Use access code from backup if provided, otherwise require manual setup
                 access_code = printer_data.get("access_code")
@@ -711,16 +690,6 @@ async def import_backup(
                 # Handle bool or string "true"/"false"
                 if isinstance(is_active_from_backup, str):
                     is_active_from_backup = is_active_from_backup.lower() == "true"
-
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"Restore: Creating printer {printer_data['name']}")
-                logger.info(f"  - access_code in backup: {'YES' if 'access_code' in printer_data else 'NO'}")
-                logger.info(f"  - access_code value: {access_code[:4] + '...' if access_code and len(access_code) > 4 else access_code}")
-                logger.info(f"  - has_access_code (valid): {has_access_code}")
-                logger.info(f"  - is_active in backup: {printer_data.get('is_active')} (type: {type(printer_data.get('is_active')).__name__})")
-                logger.info(f"  - is_active_from_backup (converted): {is_active_from_backup}")
-                logger.info(f"  - final is_active: {is_active_from_backup if has_access_code else False}")
 
                 printer = Printer(
                     name=printer_data["name"],
@@ -867,9 +836,6 @@ async def import_backup(
 
     await db.commit()
 
-    import logging
-    logger = logging.getLogger(__name__)
-
     # If printers were in the backup (restored, updated, or skipped), reconnect all active printers
     # This ensures connections are re-established after restore, even if printers were skipped
     if "printers" in backup:
@@ -878,15 +844,12 @@ async def import_backup(
             select(Printer).where(Printer.is_active == True)
         )
         active_printers = result.scalars().all()
-        logger.info(f"Restore: Found {len(active_printers)} active printers to reconnect")
         for printer in active_printers:
-            logger.info(f"Restore: Reconnecting printer {printer.name} (id={printer.id}, ip={printer.ip_address}, access_code={'SET' if printer.access_code and printer.access_code != 'CHANGE_ME' else 'NOT SET'})")
             # This will disconnect existing connection (if any) and reconnect
             try:
-                connected = await printer_manager.connect_printer(printer)
-                logger.info(f"Restore: Printer {printer.name} connection result: {connected}")
-            except Exception as e:
-                logger.error(f"Restore: Failed to connect printer {printer.name}: {e}")
+                await printer_manager.connect_printer(printer)
+            except Exception:
+                pass  # Connection failed, but don't fail the restore
 
     # If settings were restored, check if Spoolman needs to be reconnected
     if "settings" in backup:
