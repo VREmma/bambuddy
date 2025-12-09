@@ -106,22 +106,29 @@ class PrinterManager:
             self.disconnect_printer(printer_id)
 
     def get_status(self, printer_id: int) -> PrinterState | None:
-        """Get the current status of a printer."""
+        """Get the current status of a printer (checks for stale connections)."""
         if printer_id in self._clients:
-            return self._clients[printer_id].state
+            client = self._clients[printer_id]
+            # Check staleness and update connected state if needed
+            client.check_staleness()
+            return client.state
         return None
 
     def get_all_statuses(self) -> dict[int, PrinterState]:
-        """Get status of all connected printers."""
-        return {
-            printer_id: client.state
-            for printer_id, client in self._clients.items()
-        }
+        """Get status of all connected printers (checks for stale connections)."""
+        result = {}
+        for printer_id, client in self._clients.items():
+            # Check staleness and update connected state if needed
+            client.check_staleness()
+            result[printer_id] = client.state
+        return result
 
     def is_connected(self, printer_id: int) -> bool:
-        """Check if a printer is connected."""
+        """Check if a printer is connected (checks for stale connections)."""
         if printer_id in self._clients:
-            return self._clients[printer_id].state.connected
+            client = self._clients[printer_id]
+            # Check staleness and update connected state if needed
+            return client.check_staleness()
         return False
 
     def get_client(self, printer_id: int) -> BambuMQTTClient | None:
