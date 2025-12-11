@@ -20,6 +20,9 @@ aioftp>=0.22.0
 # Excel Export
 openpyxl>=3.1.0
 
+# Notifications
+pywebpush>=2.0.0
+
 # Utilities
 python-multipart>=0.0.6
 aiofiles>=23.0.0

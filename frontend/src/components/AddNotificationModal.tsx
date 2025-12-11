@@ -12,11 +12,12 @@ interface AddNotificationModalProps {
 }
 
 const PROVIDER_OPTIONS: { value: ProviderType; label: string; description: string }[] = [
+  { value: 'email', label: 'Email', description: 'SMTP email notifications' },
+  { value: 'webpush', label: 'Browser Push', description: 'Push notifications to subscribed browsers (PWA)' },
   { value: 'discord', label: 'Discord', description: 'Send to Discord channel via webhook' },
   { value: 'telegram', label: 'Telegram', description: 'Notifications via Telegram bot' },
   { value: 'ntfy', label: 'ntfy', description: 'Free, self-hostable push notifications' },
   { value: 'pushover', label: 'Pushover', description: 'Simple, reliable push notifications' },
-  { value: 'email', label: 'Email', description: 'SMTP email notifications' },
   { value: 'callmebot', label: 'CallMeBot/WhatsApp', description: 'Free WhatsApp notifications via CallMeBot' },
   { value: 'webhook', label: 'Webhook', description: 'Generic HTTP POST to any URL' },
 ];
@@ -26,7 +27,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
   const isEditing = !!provider;
 
   const [name, setName] = useState(provider?.name || '');
-  const [providerType, setProviderType] = useState<ProviderType>(provider?.provider_type || 'discord');
+  const [providerType, setProviderType] = useState<ProviderType>(provider?.provider_type || 'email');
   const [printerId, setPrinterId] = useState<number | null>(provider?.printer_id || null);
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(provider?.quiet_hours_enabled || false);
   const [quietHoursStart, setQuietHoursStart] = useState(provider?.quiet_hours_start || '22:00');
@@ -210,6 +211,8 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
           { key: 'field_title', label: 'Title Field Name', placeholder: 'title', type: 'text', required: false },
           { key: 'field_message', label: 'Message Field Name', placeholder: 'message', type: 'text', required: false },
         ];
+      case 'webpush':
+        return []; // No config needed - sends to all subscribed browsers
       default:
         return [];
     }
@@ -290,6 +293,16 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
           {/* Provider-specific configuration */}
           <div className="space-y-3">
             <p className="text-sm text-bambu-gray">Configuration</p>
+            {providerType === 'webpush' && (
+              <div className="p-3 bg-bambu-green/10 border border-bambu-green/30 rounded-lg text-sm">
+                <p className="text-bambu-green font-medium mb-1">No configuration needed</p>
+                <p className="text-bambu-gray">
+                  Browser Push sends notifications to all browsers that have enabled push notifications
+                  in Settings → Notifications. Subscribe browsers using the "Browser Push Notifications"
+                  card before creating this provider.
+                </p>
+              </div>
+            )}
             {configFields.map((field) => (
               <div key={field.key}>
                 <label className="block text-sm text-bambu-gray mb-1">

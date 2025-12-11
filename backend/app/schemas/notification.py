@@ -15,6 +15,7 @@ class ProviderType(str, Enum):
     PUSHOVER = "pushover"
     TELEGRAM = "telegram"
     EMAIL = "email"
+    WEBPUSH = "webpush"
 
 
 class NotificationProviderBase(BaseModel):
@@ -215,3 +216,44 @@ class NotificationLogStats(BaseModel):
     failure_count: int
     by_event_type: dict[str, int]
     by_provider: dict[str, int]
+
+
+# Push Subscription schemas
+class PushSubscriptionCreate(BaseModel):
+    """Schema for creating a push subscription."""
+
+    endpoint: str = Field(..., description="Push service endpoint URL")
+    p256dh_key: str = Field(..., description="P-256 public key for encryption")
+    auth_key: str = Field(..., description="Authentication secret")
+    name: str | None = Field(default=None, max_length=100, description="User-friendly name")
+    user_agent: str | None = Field(default=None, max_length=255, description="Browser user agent")
+
+
+class PushSubscriptionResponse(BaseModel):
+    """Schema for push subscription API responses."""
+
+    id: int
+    endpoint: str
+    name: str | None
+    user_agent: str | None
+    enabled: bool
+    last_success: datetime | None
+    last_error: str | None
+    last_error_at: datetime | None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PushSubscriptionUpdate(BaseModel):
+    """Schema for updating a push subscription."""
+
+    name: str | None = Field(default=None, max_length=100)
+    enabled: bool | None = None
+
+
+class VapidPublicKeyResponse(BaseModel):
+    """Schema for VAPID public key response."""
+
+    public_key: str = Field(..., description="VAPID public key for push subscription")

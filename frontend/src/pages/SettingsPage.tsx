@@ -11,6 +11,7 @@ import { NotificationProviderCard } from '../components/NotificationProviderCard
 import { AddNotificationModal } from '../components/AddNotificationModal';
 import { NotificationTemplateEditor } from '../components/NotificationTemplateEditor';
 import { NotificationLogViewer } from '../components/NotificationLogViewer';
+import { BrowserPushCard } from '../components/BrowserPushCard';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { BackupModal } from '../components/BackupModal';
 import { RestoreModal } from '../components/RestoreModal';
@@ -1268,6 +1269,9 @@ export function SettingsPage() {
                 </Button>
               </div>
             </div>
+
+            {/* Browser Push Notifications */}
+            <BrowserPushCard className="mb-4" />
 
             {/* Notification Language Setting */}
             <Card className="mb-4">

@@ -764,7 +764,7 @@ export interface Filament {
 }
 
 // Notification Provider types
-export type ProviderType = 'callmebot' | 'ntfy' | 'pushover' | 'telegram' | 'email' | 'discord' | 'webhook';
+export type ProviderType = 'callmebot' | 'ntfy' | 'pushover' | 'telegram' | 'email' | 'discord' | 'webhook' | 'webpush';
 
 export interface NotificationProvider {
   id: number;
@@ -1907,6 +1907,29 @@ export const api = {
   // AMS History
   getAMSHistory: (printerId: number, amsId: number, hours = 24) =>
     request<AMSHistoryResponse>(`/ams-history/${printerId}/${amsId}?hours=${hours}`),
+
+  // Push Subscriptions (Browser Push Notifications)
+  getVapidPublicKey: () => request<VapidPublicKeyResponse>('/push/vapid-public-key'),
+  getPushSubscriptions: () => request<PushSubscription[]>('/push/subscriptions'),
+  subscribePush: (data: PushSubscriptionCreate) =>
+    request<PushSubscription>('/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updatePushSubscription: (id: number, data: PushSubscriptionUpdate) =>
+    request<PushSubscription>(`/push/subscriptions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deletePushSubscription: (id: number) =>
+    request<{ message: string }>(`/push/subscriptions/${id}`, { method: 'DELETE' }),
+  unsubscribePush: (endpoint: string) =>
+    request<{ message: string }>('/push/unsubscribe', {
+      method: 'POST',
+      body: JSON.stringify(endpoint),
+    }),
+  testPushNotification: () =>
+    request<PushTestResponse>('/push/test', { method: 'POST' }),
 };
 
 // AMS History types
@@ -1927,4 +1950,40 @@ export interface AMSHistoryResponse {
   min_temperature: number | null;
   max_temperature: number | null;
   avg_temperature: number | null;
+}
+
+// Push Subscription types
+export interface PushSubscription {
+  id: number;
+  endpoint: string;
+  name: string | null;
+  user_agent: string | null;
+  enabled: boolean;
+  last_success: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  created_at: string;
+}
+
+export interface PushSubscriptionCreate {
+  endpoint: string;
+  p256dh_key: string;
+  auth_key: string;
+  name?: string;
+  user_agent?: string;
+}
+
+export interface PushSubscriptionUpdate {
+  name?: string;
+  enabled?: boolean;
+}
+
+export interface VapidPublicKeyResponse {
+  public_key: string;
+}
+
+export interface PushTestResponse {
+  success: boolean;
+  message: string;
+  errors?: string[];
 }

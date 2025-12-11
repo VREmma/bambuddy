@@ -12,11 +12,13 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from pywebpush import webpush, WebPushException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.notification import NotificationLog, NotificationProvider, NotificationDigestQueue
+from backend.app.models.notification import NotificationLog, NotificationProvider, NotificationDigestQueue, PushSubscription
 from backend.app.models.notification_template import NotificationTemplate
+from backend.app.models.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +159,10 @@ class NotificationService:
                 return await self._send_discord(config, title, message)
             elif provider_type == "webhook":
                 return await self._send_webhook(config, title, message)
+            elif provider_type == "webpush":
+                if db is None:
+                    return False, "Database session required for webpush test"
+                return await self._send_webpush(db, title, message)
             else:
                 return False, f"Unknown provider type: {provider_type}"
         except Exception as e:
@@ -379,8 +385,88 @@ class NotificationService:
         except Exception as e:
             return False, f"Webhook error: {str(e)}"
 
+    async def _get_vapid_keys(self, db: AsyncSession) -> tuple[str | None, str | None]:
+        """Get VAPID keys from database settings."""
+        result = await db.execute(
+            select(Settings).where(Settings.key.in_(["vapid_private_key", "vapid_public_key"]))
+        )
+        settings = {s.key: s.value for s in result.scalars().all()}
+        return settings.get("vapid_private_key"), settings.get("vapid_public_key")
+
+    async def _get_vapid_claims_email(self, db: AsyncSession) -> str:
+        """Get the email for VAPID claims."""
+        result = await db.execute(select(Settings).where(Settings.key == "vapid_claims_email"))
+        setting = result.scalar_one_or_none()
+        return setting.value if setting else "mailto:bambuddy@localhost"
+
+    async def _send_webpush(self, db: AsyncSession, title: str, message: str) -> tuple[bool, str]:
+        """Send notification via Web Push to all subscribed browsers."""
+        private_key, public_key = await self._get_vapid_keys(db)
+
+        if not private_key or not public_key:
+            return False, "VAPID keys not configured. Subscribe a browser first."
+
+        claims_email = await self._get_vapid_claims_email(db)
+
+        # Get all enabled push subscriptions
+        result = await db.execute(
+            select(PushSubscription).where(PushSubscription.enabled == True)
+        )
+        subscriptions = list(result.scalars().all())
+
+        if not subscriptions:
+            return False, "No push subscriptions found"
+
+        success_count = 0
+        error_count = 0
+        last_error = ""
+
+        for sub in subscriptions:
+            subscription_info = {
+                "endpoint": sub.endpoint,
+                "keys": {
+                    "p256dh": sub.p256dh_key,
+                    "auth": sub.auth_key,
+                },
+            }
+
+            payload = json.dumps({
+                "title": title,
+                "body": message,
+                "url": "/",
+            })
+
+            try:
+                webpush(
+                    subscription_info=subscription_info,
+                    data=payload,
+                    vapid_private_key=private_key,
+                    vapid_claims={"sub": claims_email},
+                )
+                sub.last_success = datetime.utcnow()
+                success_count += 1
+                logger.debug(f"Web push sent to: {sub.name or sub.id}")
+            except WebPushException as e:
+                error_count += 1
+                sub.last_error = str(e)
+                sub.last_error_at = datetime.utcnow()
+                last_error = str(e)
+                logger.warning(f"Web push error for {sub.name or sub.id}: {e}")
+
+                # If subscription is gone (410), mark it as disabled
+                if e.response and e.response.status_code == 410:
+                    sub.enabled = False
+                    logger.info(f"Disabled expired subscription: {sub.name or sub.id}")
+
+        await db.commit()
+
+        if success_count > 0:
+            return True, f"Sent to {success_count} device(s)"
+        else:
+            return False, f"Failed to send to all {error_count} device(s): {last_error}"
+
     async def _send_to_provider(
-        self, provider: NotificationProvider, title: str, message: str
+        self, provider: NotificationProvider, title: str, message: str, db: AsyncSession | None = None
     ) -> tuple[bool, str]:
         """Send notification to a specific provider."""
         # Check quiet hours
@@ -405,6 +491,10 @@ class NotificationService:
                 return await self._send_discord(config, title, message)
             elif provider.provider_type == "webhook":
                 return await self._send_webhook(config, title, message)
+            elif provider.provider_type == "webpush":
+                if db is None:
+                    return False, "Database session required for webpush"
+                return await self._send_webpush(db, title, message)
             else:
                 return False, f"Unknown provider type: {provider.provider_type}"
         except Exception as e:
@@ -497,7 +587,7 @@ class NotificationService:
         for provider in providers:
             try:
                 # Always send notification immediately
-                success, error = await self._send_to_provider(provider, title, message)
+                success, error = await self._send_to_provider(provider, title, message, db)
 
                 # Also queue for digest if enabled (digest is a summary, not a queue)
                 if provider.daily_digest_enabled and provider.daily_digest_time:
@@ -864,7 +954,7 @@ class NotificationService:
             body = "\n".join(body_parts)
 
             # Send the digest
-            success, error = await self._send_to_provider(provider, title, body)
+            success, error = await self._send_to_provider(provider, title, body, db)
 
             # Log the digest
             await self._log_notification(

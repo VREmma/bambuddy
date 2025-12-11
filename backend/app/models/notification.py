@@ -101,3 +101,30 @@ class NotificationProvider(Base):
     printer = relationship("Printer", back_populates="notification_providers")
     logs = relationship("NotificationLog", back_populates="provider", cascade="all, delete-orphan")
     digest_queue = relationship("NotificationDigestQueue", back_populates="provider", cascade="all, delete-orphan")
+
+
+class PushSubscription(Base):
+    """Model for storing Web Push subscriptions (browser endpoints)."""
+
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Subscription data from browser's PushManager
+    endpoint = Column(Text, nullable=False, unique=True)  # Push service URL
+    p256dh_key = Column(String(255), nullable=False)  # Public key for encryption
+    auth_key = Column(String(255), nullable=False)  # Auth secret
+
+    # User-friendly name for this subscription
+    name = Column(String(100), nullable=True)  # e.g., "Chrome on Phone", "Firefox Desktop"
+    user_agent = Column(String(255), nullable=True)  # Browser user agent for identification
+
+    # Status
+    enabled = Column(Boolean, default=True)
+    last_success = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+    last_error_at = Column(DateTime, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

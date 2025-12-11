@@ -134,10 +134,11 @@ async def create_notification_provider(
 @router.post("/test-config", response_model=NotificationTestResponse)
 async def test_notification_config(
     test_request: NotificationTestRequest,
+    db: AsyncSession = Depends(get_db),
 ):
     """Test notification configuration before saving."""
     success, message = await notification_service.send_test_notification(
-        test_request.provider_type.value, test_request.config
+        test_request.provider_type.value, test_request.config, db
     )
 
     return NotificationTestResponse(success=success, message=message)
@@ -161,7 +162,7 @@ async def test_all_notification_providers(db: AsyncSession = Depends(get_db)):
     for provider in providers:
         config = json.loads(provider.config) if isinstance(provider.config, str) else provider.config
         success, message = await notification_service.send_test_notification(
-            provider.provider_type, config
+            provider.provider_type, config, db
         )
 
         # Update provider status
@@ -415,7 +416,7 @@ async def test_notification_provider(
 
     config = json.loads(provider.config) if isinstance(provider.config, str) else provider.config
     success, message = await notification_service.send_test_notification(
-        provider.provider_type, config
+        provider.provider_type, config, db
     )
 
     # Update provider status
