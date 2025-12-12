@@ -52,7 +52,8 @@
 
 ### 📊 Monitoring & Stats
 - Real-time printer status via WebSocket
-- HMS error monitoring
+- Live camera streaming (MJPEG) & snapshots
+- HMS error monitoring with history
 - Print success rates & trends
 - Filament usage tracking
 - Cost analytics & failure analysis
@@ -62,6 +63,7 @@
 - Print queue with drag-and-drop
 - Scheduled prints (date/time)
 - Smart plug integration (Tasmota)
+- Energy consumption tracking
 - Auto power-on before print
 - Auto power-off after cooldown
 
@@ -94,11 +96,19 @@
 - Print time accuracy stats
 - File manager for printer storage
 
+### 🎛️ Printer Control
+- AMS/AMS-HT temperature & humidity monitoring
+- Chamber temperature & light control
+- Speed profiles & fan controls
+- AI detection modules (spaghetti, first layer)
+- Automated calibration (bed level, vibration)
+- Dual nozzle support
+
 </td>
 </tr>
 </table>
 
-**Plus:** Dark/light theme • Mobile responsive • Keyboard shortcuts • Multi-language (EN/DE) • Auto updates
+**Plus:** Dark/light theme • Mobile responsive • Keyboard shortcuts • Multi-language (EN/DE) • Auto updates • Database backup/restore • System info dashboard
 
 ---
 
