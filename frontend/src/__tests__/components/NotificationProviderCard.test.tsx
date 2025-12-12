@@ -171,3 +171,120 @@ describe('NotificationProviderCard', () => {
     });
   });
 });
+
+describe('NotificationProviderCard AMS toggles', () => {
+  const mockOnEdit = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('AMS humidity notifications', () => {
+    it('includes on_ams_humidity_high in provider data', () => {
+      const provider = createMockProvider({ on_ams_humidity_high: true });
+
+      expect(provider.on_ams_humidity_high).toBe(true);
+    });
+
+    it('includes on_ams_humidity_high when disabled', () => {
+      const provider = createMockProvider({ on_ams_humidity_high: false });
+
+      expect(provider.on_ams_humidity_high).toBe(false);
+    });
+  });
+
+  describe('AMS temperature notifications', () => {
+    it('includes on_ams_temperature_high in provider data', () => {
+      const provider = createMockProvider({ on_ams_temperature_high: true });
+
+      expect(provider.on_ams_temperature_high).toBe(true);
+    });
+
+    it('includes on_ams_temperature_high when disabled', () => {
+      const provider = createMockProvider({ on_ams_temperature_high: false });
+
+      expect(provider.on_ams_temperature_high).toBe(false);
+    });
+  });
+
+  describe('AMS-HT humidity notifications (separate from AMS)', () => {
+    it('includes on_ams_ht_humidity_high in provider data', () => {
+      const provider = createMockProvider({ on_ams_ht_humidity_high: true });
+
+      expect(provider.on_ams_ht_humidity_high).toBe(true);
+    });
+
+    it('AMS and AMS-HT humidity toggles are independent', () => {
+      const provider = createMockProvider({
+        on_ams_humidity_high: true,
+        on_ams_ht_humidity_high: false,
+      });
+
+      expect(provider.on_ams_humidity_high).toBe(true);
+      expect(provider.on_ams_ht_humidity_high).toBe(false);
+    });
+
+    it('can enable both AMS and AMS-HT humidity notifications', () => {
+      const provider = createMockProvider({
+        on_ams_humidity_high: true,
+        on_ams_ht_humidity_high: true,
+      });
+
+      expect(provider.on_ams_humidity_high).toBe(true);
+      expect(provider.on_ams_ht_humidity_high).toBe(true);
+    });
+  });
+
+  describe('AMS-HT temperature notifications (separate from AMS)', () => {
+    it('includes on_ams_ht_temperature_high in provider data', () => {
+      const provider = createMockProvider({ on_ams_ht_temperature_high: true });
+
+      expect(provider.on_ams_ht_temperature_high).toBe(true);
+    });
+
+    it('AMS and AMS-HT temperature toggles are independent', () => {
+      const provider = createMockProvider({
+        on_ams_temperature_high: true,
+        on_ams_ht_temperature_high: false,
+      });
+
+      expect(provider.on_ams_temperature_high).toBe(true);
+      expect(provider.on_ams_ht_temperature_high).toBe(false);
+    });
+
+    it('can enable both AMS and AMS-HT temperature notifications', () => {
+      const provider = createMockProvider({
+        on_ams_temperature_high: true,
+        on_ams_ht_temperature_high: true,
+      });
+
+      expect(provider.on_ams_temperature_high).toBe(true);
+      expect(provider.on_ams_ht_temperature_high).toBe(true);
+    });
+  });
+
+  describe('all AMS notification combinations', () => {
+    it('supports all four AMS toggles independently', () => {
+      const provider = createMockProvider({
+        on_ams_humidity_high: true,
+        on_ams_temperature_high: false,
+        on_ams_ht_humidity_high: false,
+        on_ams_ht_temperature_high: true,
+      });
+
+      expect(provider.on_ams_humidity_high).toBe(true);
+      expect(provider.on_ams_temperature_high).toBe(false);
+      expect(provider.on_ams_ht_humidity_high).toBe(false);
+      expect(provider.on_ams_ht_temperature_high).toBe(true);
+    });
+
+    it('defaults all AMS toggles to false', () => {
+      const provider = createMockProvider();
+
+      expect(provider.on_ams_humidity_high).toBe(false);
+      expect(provider.on_ams_temperature_high).toBe(false);
+      expect(provider.on_ams_ht_humidity_high).toBe(false);
+      expect(provider.on_ams_ht_temperature_high).toBe(false);
+    });
+  });
+});

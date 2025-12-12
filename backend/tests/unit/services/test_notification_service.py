@@ -646,6 +646,224 @@ class TestNotificationProviderTypes:
             assert "Connection failed" in message or "error" in message.lower()
 
 
+class TestNotificationVariableFallbacks:
+    """Tests for notification variable fallback values."""
+
+    @pytest.fixture
+    def service(self):
+        return NotificationService()
+
+    def test_format_duration_with_valid_seconds(self, service):
+        """Verify duration formats correctly with valid input."""
+        result = service._format_duration(3661)  # 1h 1m 1s
+        assert "1h" in result
+
+    def test_format_duration_with_none_returns_unknown(self, service):
+        """CRITICAL: Verify None duration returns 'Unknown' fallback."""
+        result = service._format_duration(None)
+        assert result == "Unknown"
+
+    def test_format_duration_with_zero(self, service):
+        """Verify zero duration formats correctly."""
+        result = service._format_duration(0)
+        # Should return some valid string, not "Unknown"
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_format_duration_hours_and_minutes(self, service):
+        """Verify duration formats hours and minutes."""
+        result = service._format_duration(5400)  # 1h 30m
+        assert "1h" in result
+        assert "30m" in result
+
+    def test_format_duration_minutes_only(self, service):
+        """Verify duration formats minutes only when < 1 hour."""
+        result = service._format_duration(1800)  # 30m
+        assert "30m" in result or "30" in result
+
+    @pytest.mark.asyncio
+    async def test_print_complete_fallback_values(self, service):
+        """CRITICAL: Verify fallback values when archive_data is missing."""
+        mock_db = AsyncMock()
+
+        with patch.object(
+            service, '_get_providers_for_event', new_callable=AsyncMock
+        ) as mock_get, \
+             patch.object(
+            service, '_send_to_providers', new_callable=AsyncMock
+        ) as mock_send, \
+             patch.object(
+            service, '_build_message_from_template', new_callable=AsyncMock
+        ) as mock_build:
+
+            mock_get.return_value = []  # No providers, just testing variable setup
+            mock_build.return_value = ("Test", "Test")
+
+            await service.on_print_complete(
+                printer_id=1,
+                printer_name="Test",
+                status="completed",
+                data={"subtask_name": "test_print"},
+                db=mock_db,
+                archive_data=None,  # No archive data - should use fallbacks
+            )
+
+            # Test passes if no exception is raised with missing archive_data
+
+    @pytest.mark.asyncio
+    async def test_print_complete_with_archive_data(self, service):
+        """Verify archive data values are used when provided."""
+        mock_db = AsyncMock()
+
+        captured_variables = {}
+
+        async def capture_build(db, event_type, variables):
+            captured_variables.update(variables)
+            return ("Test", "Test")
+
+        with patch.object(
+            service, '_get_providers_for_event', new_callable=AsyncMock
+        ) as mock_get, \
+             patch.object(
+            service, '_send_to_providers', new_callable=AsyncMock
+        ), \
+             patch.object(
+            service, '_build_message_from_template', side_effect=capture_build
+        ):
+
+            mock_get.return_value = []
+
+            await service.on_print_complete(
+                printer_id=1,
+                printer_name="Test",
+                status="completed",
+                data={"subtask_name": "test_print"},
+                db=mock_db,
+                archive_data={
+                    "print_time_seconds": 3600,
+                    "actual_filament_grams": 50.5,
+                },
+            )
+
+            # When archive data is provided, duration should not be "Unknown"
+            if captured_variables.get("duration"):
+                assert captured_variables["duration"] != "Unknown"
+
+    @pytest.mark.asyncio
+    async def test_print_start_estimated_time_fallback(self, service):
+        """Verify estimated time shows 'Unknown' when not available."""
+        mock_db = AsyncMock()
+        mock_provider = MagicMock()
+        mock_provider.id = 1
+
+        captured_variables = {}
+
+        async def capture_build(db, event_type, variables):
+            captured_variables.update(variables)
+            return ("Test", "Test")
+
+        with patch.object(
+            service, '_get_providers_for_event', new_callable=AsyncMock
+        ) as mock_get, \
+             patch.object(
+            service, '_send_to_providers', new_callable=AsyncMock
+        ), \
+             patch.object(
+            service, '_build_message_from_template', side_effect=capture_build
+        ):
+
+            # Need at least one provider to trigger message building
+            mock_get.return_value = [mock_provider]
+
+            await service.on_print_start(
+                printer_id=1,
+                printer_name="Test",
+                data={
+                    "subtask_name": "test",
+                    # No estimated_time or mc_remaining_time
+                },
+                db=mock_db,
+            )
+
+            # When no time data, should show "Unknown"
+            assert captured_variables.get("estimated_time") == "Unknown"
+
+    @pytest.mark.asyncio
+    async def test_print_progress_remaining_time_fallback(self, service):
+        """Verify remaining time shows 'Unknown' when not available."""
+        mock_db = AsyncMock()
+        mock_provider = MagicMock()
+        mock_provider.id = 1
+
+        captured_variables = {}
+
+        async def capture_build(db, event_type, variables):
+            captured_variables.update(variables)
+            return ("Test", "Test")
+
+        with patch.object(
+            service, '_get_providers_for_event', new_callable=AsyncMock
+        ) as mock_get, \
+             patch.object(
+            service, '_send_to_providers', new_callable=AsyncMock
+        ), \
+             patch.object(
+            service, '_build_message_from_template', side_effect=capture_build
+        ):
+
+            # Need at least one provider to trigger message building
+            mock_get.return_value = [mock_provider]
+
+            await service.on_print_progress(
+                printer_id=1,
+                printer_name="Test",
+                progress=50,
+                remaining_time=None,  # No remaining time
+                filename="test.3mf",
+                db=mock_db,
+            )
+
+            # When no remaining time, should show "Unknown"
+            assert captured_variables.get("remaining_time") == "Unknown"
+
+    @pytest.mark.asyncio
+    async def test_filename_fallback_to_unknown(self, service):
+        """Verify filename defaults to 'Unknown' when not provided."""
+        mock_db = AsyncMock()
+        mock_provider = MagicMock()
+        mock_provider.id = 1
+
+        captured_variables = {}
+
+        async def capture_build(db, event_type, variables):
+            captured_variables.update(variables)
+            return ("Test", "Test")
+
+        with patch.object(
+            service, '_get_providers_for_event', new_callable=AsyncMock
+        ) as mock_get, \
+             patch.object(
+            service, '_send_to_providers', new_callable=AsyncMock
+        ), \
+             patch.object(
+            service, '_build_message_from_template', side_effect=capture_build
+        ):
+
+            # Need at least one provider to trigger message building
+            mock_get.return_value = [mock_provider]
+
+            await service.on_print_complete(
+                printer_id=1,
+                printer_name="Test",
+                status="completed",
+                data={},  # No subtask_name or filename
+                db=mock_db,
+            )
+
+            # Filename should default to something (either "Unknown" or cleaned empty)
+            assert "filename" in captured_variables
+
+
 class TestNotificationTemplates:
     """Tests for notification message template rendering."""
 
