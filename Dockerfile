@@ -14,13 +14,16 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install system dependencies (curl for health checks/testing)
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# Install system dependencies
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
 # Copy backend
 COPY backend/ ./backend/
