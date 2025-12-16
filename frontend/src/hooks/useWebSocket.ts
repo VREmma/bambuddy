@@ -13,6 +13,10 @@ export function useWebSocket() {
   const queryClient = useQueryClient();
   const [isConnected, setIsConnected] = useState(false);
 
+  // Debounce invalidations to prevent rapid re-render cascades
+  const pendingInvalidations = useRef<Set<string>>(new Set());
+  const invalidationTimeoutRef = useRef<number | null>(null);
+
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
@@ -68,6 +72,30 @@ export function useWebSocket() {
     wsRef.current = ws;
   }, []);
 
+  // Debounced invalidation helper - coalesces multiple rapid invalidations
+  const debouncedInvalidate = useCallback((queryKey: string) => {
+    pendingInvalidations.current.add(queryKey);
+
+    // Clear existing timeout
+    if (invalidationTimeoutRef.current) {
+      clearTimeout(invalidationTimeoutRef.current);
+    }
+
+    // Schedule invalidation after a short delay (100ms)
+    invalidationTimeoutRef.current = window.setTimeout(() => {
+      const keys = Array.from(pendingInvalidations.current);
+      pendingInvalidations.current.clear();
+      invalidationTimeoutRef.current = null;
+
+      // Use requestAnimationFrame to avoid blocking the main thread
+      requestAnimationFrame(() => {
+        keys.forEach((key) => {
+          queryClient.invalidateQueries({ queryKey: [key] });
+        });
+      });
+    }, 100);
+  }, [queryClient]);
+
   const handleMessage = useCallback((message: WebSocketMessage) => {
     switch (message.type) {
       case 'printer_status':
@@ -91,27 +119,27 @@ export function useWebSocket() {
         break;
 
       case 'print_complete':
-        // Invalidate archives to refresh the list
-        queryClient.invalidateQueries({ queryKey: ['archives'] });
-        queryClient.invalidateQueries({ queryKey: ['archiveStats'] });
+        // Invalidate archives to refresh the list (debounced)
+        debouncedInvalidate('archives');
+        debouncedInvalidate('archiveStats');
         break;
 
       case 'archive_created':
-        // Invalidate archives to show new archive
-        queryClient.invalidateQueries({ queryKey: ['archives'] });
-        queryClient.invalidateQueries({ queryKey: ['archiveStats'] });
+        // Invalidate archives to show new archive (debounced)
+        debouncedInvalidate('archives');
+        debouncedInvalidate('archiveStats');
         break;
 
       case 'archive_updated':
-        // Invalidate archives to refresh (e.g., timelapse attached)
-        queryClient.invalidateQueries({ queryKey: ['archives'] });
+        // Invalidate archives to refresh (debounced)
+        debouncedInvalidate('archives');
         break;
 
       case 'pong':
         // Keepalive response, ignore
         break;
     }
-  }, [queryClient]);
+  }, [queryClient, debouncedInvalidate]);
 
   useEffect(() => {
     connect();
@@ -119,6 +147,9 @@ export function useWebSocket() {
     return () => {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (invalidationTimeoutRef.current) {
+        clearTimeout(invalidationTimeoutRef.current);
       }
       if (wsRef.current) {
         wsRef.current.close();
