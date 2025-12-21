@@ -228,9 +228,14 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
                     f"Auto-detected dual-nozzle printer {printer_id}, updated nozzle_count=2"
                 )
 
+    # Include target temps for heating phase detection
+    bed_target = round(temps.get("bed_target", 0))
+    nozzle_target = round(temps.get("nozzle_target", 0))
+
     status_key = (
         f"{state.connected}:{state.state}:{state.progress}:{state.layer_num}:"
-        f"{nozzle_temp}:{bed_temp}:{nozzle_2_temp}:{chamber_temp}"
+        f"{nozzle_temp}:{bed_temp}:{nozzle_2_temp}:{chamber_temp}:"
+        f"{state.stg_cur}:{bed_target}:{nozzle_target}"
     )
     if _last_status_broadcast.get(printer_id) == status_key:
         return  # No change, skip broadcast

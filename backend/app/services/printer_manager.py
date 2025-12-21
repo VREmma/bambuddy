@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.printer import Printer
-from backend.app.services.bambu_mqtt import BambuMQTTClient, MQTTLogEntry, PrinterState
+from backend.app.services.bambu_mqtt import BambuMQTTClient, MQTTLogEntry, PrinterState, get_stage_name
 
 
 class PrinterManager:
@@ -280,6 +280,55 @@ class PrinterManager:
         return result
 
 
+def get_derived_status_name(state: PrinterState) -> str | None:
+    """
+    Compute a human-readable status name based on printer state.
+
+    Uses stg_cur when available, otherwise derives status from temperature data
+    when the printer is heating before a print starts.
+    """
+    # If we have a valid calibration stage, use it
+    if state.stg_cur >= 0:
+        return get_stage_name(state.stg_cur)
+
+    # If not in RUNNING state, no derived status needed
+    if state.state != "RUNNING":
+        return None
+
+    # Check if we're in an early phase where temperatures are heating
+    temps = state.temperatures or {}
+    progress = state.progress or 0
+
+    # Only derive heating status when progress is very low (< 2%)
+    # This indicates we're in the preparation phase, not actually printing
+    if progress >= 2:
+        return None
+
+    # Check bed temperature - if target is set and current is significantly below
+    bed_temp = temps.get("bed", 0)
+    bed_target = temps.get("bed_target", 0)
+
+    # Check nozzle temperature
+    nozzle_temp = temps.get("nozzle", 0)
+    nozzle_target = temps.get("nozzle_target", 0)
+
+    # Temperature thresholds: consider "heating" if more than 10°C below target
+    TEMP_THRESHOLD = 10
+
+    # Determine what's heating (prioritize bed since it takes longer)
+    if bed_target > 30 and (bed_target - bed_temp) > TEMP_THRESHOLD:
+        return "Heating heatbed"
+    elif nozzle_target > 30 and (nozzle_target - nozzle_temp) > TEMP_THRESHOLD:
+        return "Heating nozzle"
+
+    # If targets are set but we're close to them, we might be in final prep
+    if bed_target > 30 or nozzle_target > 30:
+        if progress == 0 and state.layer_num == 0:
+            return "Preparing"
+
+    return None
+
+
 def printer_state_to_dict(state: PrinterState, printer_id: int | None = None) -> dict:
     """Convert PrinterState to a JSON-serializable dict."""
     # Parse AMS data from raw_data
@@ -383,6 +432,9 @@ def printer_state_to_dict(state: PrinterState, printer_id: int | None = None) ->
         "ams_extruder_map": ams_extruder_map,
         # WiFi signal strength
         "wifi_signal": state.wifi_signal,
+        # Calibration stage tracking
+        "stg_cur": state.stg_cur,
+        "stg_cur_name": get_derived_status_name(state),
     }
     # Add cover URL if there's an active print and printer_id is provided
     if printer_id and state.state == "RUNNING" and state.gcode_file:

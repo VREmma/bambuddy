@@ -28,8 +28,7 @@ from backend.app.services.bambu_ftp import (
     get_storage_info_async,
     list_files_async,
 )
-from backend.app.services.bambu_mqtt import get_stage_name
-from backend.app.services.printer_manager import printer_manager
+from backend.app.services.printer_manager import get_derived_status_name, printer_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printers", tags=["printers"])
@@ -300,7 +299,7 @@ async def get_printer_status(printer_id: int, db: AsyncSession = Depends(get_db)
         nozzles=nozzles,
         print_options=print_options,
         stg_cur=state.stg_cur,
-        stg_cur_name=get_stage_name(state.stg_cur) if state.stg_cur >= 0 else None,
+        stg_cur_name=get_derived_status_name(state),
         stg=state.stg,
         airduct_mode=state.airduct_mode,
         speed_level=state.speed_level,

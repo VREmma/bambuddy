@@ -504,6 +504,34 @@ function StatusSummaryBar({ printers }: { printers: Printer[] | undefined }) {
 type SortOption = 'name' | 'status' | 'model' | 'location';
 type ViewMode = 'expanded' | 'compact';
 
+/**
+ * Get human-readable status display text for a printer.
+ * Uses stg_cur_name for detailed calibration/preparation stages,
+ * otherwise formats the gcode_state nicely.
+ */
+function getStatusDisplay(state: string | null | undefined, stg_cur_name: string | null | undefined): string {
+  // If we have a specific stage name (calibration, heating, etc.), use it
+  if (stg_cur_name) {
+    return stg_cur_name;
+  }
+
+  // Format the gcode_state nicely
+  switch (state) {
+    case 'RUNNING':
+      return 'Printing';
+    case 'PAUSE':
+      return 'Paused';
+    case 'FINISH':
+      return 'Finished';
+    case 'FAILED':
+      return 'Failed';
+    case 'IDLE':
+      return 'Idle';
+    default:
+      return state ? state.charAt(0) + state.slice(1).toLowerCase() : 'Idle';
+  }
+}
+
 function PrinterCard({
   printer,
   hideIfDisconnected,
@@ -879,7 +907,7 @@ function PrinterCard({
                     <span className="text-xs text-white">{Math.round(status.progress || 0)}%</span>
                   </div>
                 ) : (
-                  <p className="text-xs text-bambu-gray capitalize">{status.state?.toLowerCase() || 'Idle'}</p>
+                  <p className="text-xs text-bambu-gray">{getStatusDisplay(status.state, status.stg_cur_name)}</p>
                 )}
               </div>
             ) : (
@@ -897,7 +925,7 @@ function PrinterCard({
                     <div className="flex-1 min-w-0">
                       {status.current_print && status.state === 'RUNNING' ? (
                         <>
-                          <p className="text-sm text-bambu-gray mb-1">Printing</p>
+                          <p className="text-sm text-bambu-gray mb-1">{status.stg_cur_name || 'Printing'}</p>
                           <p className="text-white text-sm mb-2 truncate">
                             {status.subtask_name || status.current_print}
                           </p>
@@ -933,8 +961,8 @@ function PrinterCard({
                       ) : (
                         <>
                           <p className="text-sm text-bambu-gray mb-1">Status</p>
-                          <p className="text-white text-sm mb-2 capitalize">
-                            {status.state?.toLowerCase() || 'Idle'}
+                          <p className="text-white text-sm mb-2">
+                            {getStatusDisplay(status.state, status.stg_cur_name)}
                           </p>
                           <div className="flex items-center justify-between text-sm">
                             <div className="flex-1 bg-bambu-dark-tertiary rounded-full h-2 mr-3">
