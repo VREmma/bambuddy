@@ -56,6 +56,7 @@ from backend.app.api.routes import (
     archives,
     camera,
     cloud,
+    discovery,
     external_links,
     filaments,
     kprofiles,
@@ -228,9 +229,14 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
                     f"Auto-detected dual-nozzle printer {printer_id}, updated nozzle_count=2"
                 )
 
+    # Include target temps for heating phase detection
+    bed_target = round(temps.get("bed_target", 0))
+    nozzle_target = round(temps.get("nozzle_target", 0))
+
     status_key = (
         f"{state.connected}:{state.state}:{state.progress}:{state.layer_num}:"
-        f"{nozzle_temp}:{bed_temp}:{nozzle_2_temp}:{chamber_temp}"
+        f"{nozzle_temp}:{bed_temp}:{nozzle_2_temp}:{chamber_temp}:"
+        f"{state.stg_cur}:{bed_target}:{nozzle_target}"
     )
     if _last_status_broadcast.get(printer_id) == status_key:
         return  # No change, skip broadcast
@@ -1273,8 +1279,8 @@ async def record_ams_history():
                 for printer in printers:
                     # Get current state from printer manager
                     state = printer_manager.get_status(printer.id)
-                    if not state or not state.raw_data:
-                        continue
+                    if not state or not state.connected or not state.raw_data:
+                        continue  # Skip disconnected printers - don't use stale data
 
                     raw_data = state.raw_data
                     if "ams" not in raw_data or not isinstance(raw_data["ams"], list):
@@ -1525,6 +1531,7 @@ app.include_router(webhook.router, prefix=app_settings.api_prefix)
 app.include_router(ams_history.router, prefix=app_settings.api_prefix)
 app.include_router(system.router, prefix=app_settings.api_prefix)
 app.include_router(websocket.router, prefix=app_settings.api_prefix)
+app.include_router(discovery.router, prefix=app_settings.api_prefix)
 
 
 # Serve static files (React build)

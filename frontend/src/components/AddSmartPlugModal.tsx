@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { X, Save, Loader2, Wifi, WifiOff, CheckCircle, Bell, Clock } from 'lucide-react';
+import { X, Save, Loader2, Wifi, WifiOff, CheckCircle, Bell, Clock, LayoutGrid, Search, Plug, Power } from 'lucide-react';
 import { api } from '../api/client';
-import type { SmartPlug, SmartPlugCreate, SmartPlugUpdate } from '../api/client';
+import type { SmartPlug, SmartPlugCreate, SmartPlugUpdate, DiscoveredTasmotaDevice } from '../api/client';
 import { Button } from './Button';
 
 interface AddSmartPlugModalProps {
@@ -32,6 +32,15 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
   const [scheduleOnTime, setScheduleOnTime] = useState<string>(plug?.schedule_on_time || '');
   const [scheduleOffTime, setScheduleOffTime] = useState<string>(plug?.schedule_off_time || '');
 
+  // Switchbar visibility
+  const [showInSwitchbar, setShowInSwitchbar] = useState(plug?.show_in_switchbar || false);
+
+  // Discovery state
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState({ scanned: 0, total: 0 });
+  const [discoveredDevices, setDiscoveredDevices] = useState<DiscoveredTasmotaDevice[]>([]);
+  const scanPollRef = useRef<NodeJS.Timeout | null>(null);
+
   // Fetch printers for linking
   const { data: printers } = useQuery({
     queryKey: ['printers'],
@@ -44,14 +53,81 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
     queryFn: api.getSmartPlugs,
   });
 
-  // Close on Escape key
+  // Close on Escape key and cleanup scan polling
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (scanPollRef.current) {
+        clearInterval(scanPollRef.current);
+      }
+    };
   }, [onClose]);
+
+  // Start scanning for Tasmota devices (auto-detects network)
+  const startScan = async () => {
+    setIsScanning(true);
+    setDiscoveredDevices([]);
+    setScanProgress({ scanned: 0, total: 0 });
+    setError(null);
+
+    try {
+      await api.startTasmotaScan();
+
+      // Poll function to fetch status and devices
+      const pollStatus = async () => {
+        try {
+          const status = await api.getTasmotaScanStatus();
+          setScanProgress({ scanned: status.scanned, total: status.total });
+
+          const devices = await api.getDiscoveredTasmotaDevices();
+          setDiscoveredDevices(devices);
+
+          if (!status.running) {
+            setIsScanning(false);
+            if (scanPollRef.current) {
+              clearInterval(scanPollRef.current);
+              scanPollRef.current = null;
+            }
+          }
+        } catch (e) {
+          console.error('Polling error:', e);
+        }
+      };
+
+      // Poll immediately, then every 500ms
+      await pollStatus();
+      scanPollRef.current = setInterval(pollStatus, 500);
+    } catch (err) {
+      setIsScanning(false);
+      const errorMsg = err instanceof Error ? err.message : (typeof err === 'string' ? err : JSON.stringify(err));
+      setError(errorMsg || 'Failed to start scan');
+    }
+  };
+
+  // Stop scanning
+  const stopScan = async () => {
+    try {
+      await api.stopTasmotaScan();
+    } catch {
+      // Ignore stop errors
+    }
+    setIsScanning(false);
+    if (scanPollRef.current) {
+      clearInterval(scanPollRef.current);
+      scanPollRef.current = null;
+    }
+  };
+
+  // Select a discovered device
+  const selectDevice = (device: DiscoveredTasmotaDevice) => {
+    setIpAddress(device.ip_address);
+    setName(device.name);
+    setTestResult(null);
+  };
 
   // Test connection mutation
   const testMutation = useMutation({
@@ -127,6 +203,8 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
       schedule_enabled: scheduleEnabled,
       schedule_on_time: scheduleOnTime || null,
       schedule_off_time: scheduleOffTime || null,
+      // Switchbar
+      show_in_switchbar: showInSwitchbar,
     };
 
     if (isEditing) {
@@ -165,6 +243,79 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
           {error && (
             <div className="p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-sm text-red-400">
               {error}
+            </div>
+          )}
+
+          {/* Discovery Section - only show when not editing */}
+          {!isEditing && (
+            <div className="space-y-3">
+              {/* Scan button - auto-detects network */}
+              {isScanning ? (
+                <Button type="button" variant="secondary" onClick={stopScan} className="w-full">
+                  <X className="w-4 h-4" />
+                  Stop Scanning
+                </Button>
+              ) : (
+                <Button type="button" variant="primary" onClick={startScan} className="w-full">
+                  <Search className="w-4 h-4" />
+                  Discover Tasmota Devices
+                </Button>
+              )}
+
+              {/* Progress bar */}
+              {isScanning && scanProgress.total > 0 && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-bambu-gray">
+                    <span>Scanning network...</span>
+                    <span>{scanProgress.scanned} / {scanProgress.total}</span>
+                  </div>
+                  <div className="w-full bg-bambu-dark-tertiary rounded-full h-2">
+                    <div
+                      className="bg-bambu-green h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${(scanProgress.scanned / scanProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Discovered devices */}
+              {discoveredDevices.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-bambu-gray">Found {discoveredDevices.length} device(s) - click to select:</p>
+                  <div className="max-h-40 overflow-y-auto space-y-1">
+                    {discoveredDevices.map((device) => (
+                      <button
+                        key={device.ip_address}
+                        type="button"
+                        onClick={() => selectDevice(device)}
+                        className="w-full flex items-center justify-between p-2 bg-bambu-dark hover:bg-bambu-dark-tertiary rounded-lg transition-colors text-left border border-bambu-dark-tertiary"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Plug className="w-4 h-4 text-bambu-green" />
+                          <div>
+                            <p className="text-sm text-white">{device.name}</p>
+                            <p className="text-xs text-bambu-gray">{device.ip_address}</p>
+                          </div>
+                        </div>
+                        {device.state && (
+                          <span className={`flex items-center gap-1 text-xs ${
+                            device.state === 'ON' ? 'text-bambu-green' : 'text-bambu-gray'
+                          }`}>
+                            <Power className="w-3 h-3" />
+                            {device.state}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!isScanning && discoveredDevices.length === 0 && scanProgress.total > 0 && (
+                <p className="text-xs text-bambu-gray text-center py-2">
+                  No Tasmota devices found on your network
+                </p>
+              )}
             </div>
           )}
 
@@ -380,6 +531,28 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
                 </p>
               </div>
             )}
+          </div>
+
+          {/* Switchbar Visibility */}
+          <div className="border-t border-bambu-dark-tertiary pt-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <LayoutGrid className="w-4 h-4 text-bambu-green" />
+                <div>
+                  <span className="text-white font-medium">Show in Switchbar</span>
+                  <p className="text-xs text-bambu-gray">Quick access from sidebar</p>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showInSwitchbar}
+                  onChange={(e) => setShowInSwitchbar(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
+              </label>
+            </div>
           </div>
 
           {/* Actions */}

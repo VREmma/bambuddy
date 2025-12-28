@@ -6,7 +6,6 @@ import {
   Link,
   Unlink,
   Signal,
-  Thermometer,
   Clock,
   MoreVertical,
   Trash2,
@@ -27,10 +26,12 @@ import {
   LayoutList,
   Layers,
   Video,
+  Search,
+  Loader2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../api/client';
-import type { Printer, PrinterCreate, AMSUnit } from '../api/client';
+import { api, discoveryApi } from '../api/client';
+import type { Printer, PrinterCreate, AMSUnit, DiscoveredPrinter } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -194,6 +195,47 @@ function ThermometerFull({ className }: { className?: string }) {
       <rect x="4.5" y="3" width="3" height="9.5" fill="#c62828" rx="0.5"/>
       <circle cx="6" cy="15" r="2" fill="#c62828"/>
       <path d="M6 0.5C4.6 0.5 3.5 1.6 3.5 3V12.1C2.6 12.8 2 13.9 2 15C2 17.2 3.8 19 6 19C8.2 19 10 17.2 10 15C10 13.9 9.4 12.8 8.5 12.1V3C8.5 1.6 7.4 0.5 6 0.5Z" stroke="#C3C2C1" strokeWidth="1" fill="none"/>
+    </svg>
+  );
+}
+
+// Heater thermometer icon - filled when heating, outline when off
+interface HeaterThermometerProps {
+  className?: string;
+  color: string;  // The color class (e.g., "text-orange-400")
+  isHeating: boolean;
+}
+
+function HeaterThermometer({ className, color, isHeating }: HeaterThermometerProps) {
+  // Extract the actual color from Tailwind class for SVG fill
+  const colorMap: Record<string, string> = {
+    'text-orange-400': '#fb923c',
+    'text-blue-400': '#60a5fa',
+    'text-green-400': '#4ade80',
+  };
+  const fillColor = colorMap[color] || '#888';
+
+  // Glow style when heating
+  const glowStyle = isHeating ? {
+    filter: `drop-shadow(0 0 4px ${fillColor}) drop-shadow(0 0 8px ${fillColor})`,
+  } : {};
+
+  if (isHeating) {
+    // Filled thermometer with glow - heater is ON
+    return (
+      <svg className={className} style={glowStyle} viewBox="0 0 12 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="4.5" y="3" width="3" height="9.5" fill={fillColor} rx="0.5"/>
+        <circle cx="6" cy="15" r="2" fill={fillColor}/>
+        <path d="M6 0.5C4.6 0.5 3.5 1.6 3.5 3V12.1C2.6 12.8 2 13.9 2 15C2 17.2 3.8 19 6 19C8.2 19 10 17.2 10 15C10 13.9 9.4 12.8 8.5 12.1V3C8.5 1.6 7.4 0.5 6 0.5Z" stroke={fillColor} strokeWidth="1" fill="none"/>
+      </svg>
+    );
+  }
+
+  // Empty thermometer - heater is OFF
+  return (
+    <svg className={className} viewBox="0 0 12 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M6 0.5C4.6 0.5 3.5 1.6 3.5 3V12.1C2.6 12.8 2 13.9 2 15C2 17.2 3.8 19 6 19C8.2 19 10 17.2 10 15C10 13.9 9.4 12.8 8.5 12.1V3C8.5 1.6 7.4 0.5 6 0.5Z" stroke={fillColor} strokeWidth="1" fill="none"/>
+      <circle cx="6" cy="15" r="2.5" stroke={fillColor} strokeWidth="1" fill="none"/>
     </svg>
   );
 }
@@ -504,6 +546,34 @@ function StatusSummaryBar({ printers }: { printers: Printer[] | undefined }) {
 type SortOption = 'name' | 'status' | 'model' | 'location';
 type ViewMode = 'expanded' | 'compact';
 
+/**
+ * Get human-readable status display text for a printer.
+ * Uses stg_cur_name for detailed calibration/preparation stages,
+ * otherwise formats the gcode_state nicely.
+ */
+function getStatusDisplay(state: string | null | undefined, stg_cur_name: string | null | undefined): string {
+  // If we have a specific stage name (calibration, heating, etc.), use it
+  if (stg_cur_name) {
+    return stg_cur_name;
+  }
+
+  // Format the gcode_state nicely
+  switch (state) {
+    case 'RUNNING':
+      return 'Printing';
+    case 'PAUSE':
+      return 'Paused';
+    case 'FINISH':
+      return 'Finished';
+    case 'FAILED':
+      return 'Failed';
+    case 'IDLE':
+      return 'Idle';
+    default:
+      return state ? state.charAt(0) + state.slice(1).toLowerCase() : 'Idle';
+  }
+}
+
 function PrinterCard({
   printer,
   hideIfDisconnected,
@@ -526,6 +596,7 @@ function PrinterCard({
   const navigate = useNavigate();
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteArchives, setDeleteArchives] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showFileManager, setShowFileManager] = useState(false);
   const [showMQTTDebug, setShowMQTTDebug] = useState(false);
@@ -615,9 +686,11 @@ function PrinterCard({
   const shouldHide = hideIfDisconnected && isConnected === false;
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.deletePrinter(printer.id),
+    mutationFn: (options: { deleteArchives: boolean }) =>
+      api.deletePrinter(printer.id, options.deleteArchives),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['printers'] });
+      queryClient.invalidateQueries({ queryKey: ['archives'] });
     },
   });
 
@@ -849,17 +922,64 @@ function PrinterCard({
 
         {/* Delete Confirmation */}
         {showDeleteConfirm && (
-          <ConfirmModal
-            title="Delete Printer"
-            message={`Are you sure you want to delete "${printer.name}"? This will also remove all connection settings.`}
-            confirmText="Delete"
-            variant="danger"
-            onConfirm={() => {
-              deleteMutation.mutate();
-              setShowDeleteConfirm(false);
-            }}
-            onCancel={() => setShowDeleteConfirm(false)}
-          />
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <Card className="w-full max-w-md mx-4">
+              <CardContent>
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="p-2 rounded-full bg-red-500/20">
+                    <AlertTriangle className="w-5 h-5 text-red-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Delete Printer</h3>
+                    <p className="text-sm text-bambu-gray mt-1">
+                      Are you sure you want to delete "{printer.name}"? This will remove all connection settings.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-bambu-dark rounded-lg p-3 mb-4">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={deleteArchives}
+                      onChange={(e) => setDeleteArchives(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-bambu-gray bg-bambu-dark-secondary text-bambu-green focus:ring-bambu-green focus:ring-offset-0"
+                    />
+                    <div>
+                      <span className="text-sm text-white">Delete print archives</span>
+                      <p className="text-xs text-bambu-gray mt-0.5">
+                        {deleteArchives
+                          ? 'All print history for this printer will be permanently deleted.'
+                          : 'Print history will be kept but no longer associated with this printer.'}
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setShowDeleteConfirm(false);
+                      setDeleteArchives(true);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      deleteMutation.mutate({ deleteArchives });
+                      setShowDeleteConfirm(false);
+                      setDeleteArchives(true);
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {/* Status */}
@@ -879,7 +999,7 @@ function PrinterCard({
                     <span className="text-xs text-white">{Math.round(status.progress || 0)}%</span>
                   </div>
                 ) : (
-                  <p className="text-xs text-bambu-gray capitalize">{status.state?.toLowerCase() || 'Idle'}</p>
+                  <p className="text-xs text-bambu-gray">{getStatusDisplay(status.state, status.stg_cur_name)}</p>
                 )}
               </div>
             ) : (
@@ -897,7 +1017,7 @@ function PrinterCard({
                     <div className="flex-1 min-w-0">
                       {status.current_print && status.state === 'RUNNING' ? (
                         <>
-                          <p className="text-sm text-bambu-gray mb-1">Printing</p>
+                          <p className="text-sm text-bambu-gray mb-1">{status.stg_cur_name || 'Printing'}</p>
                           <p className="text-white text-sm mb-2 truncate">
                             {status.subtask_name || status.current_print}
                           </p>
@@ -933,8 +1053,8 @@ function PrinterCard({
                       ) : (
                         <>
                           <p className="text-sm text-bambu-gray mb-1">Status</p>
-                          <p className="text-white text-sm mb-2 capitalize">
-                            {status.state?.toLowerCase() || 'Idle'}
+                          <p className="text-white text-sm mb-2">
+                            {getStatusDisplay(status.state, status.stg_cur_name)}
                           </p>
                           <div className="flex items-center justify-between text-sm">
                             <div className="flex-1 bg-bambu-dark-tertiary rounded-full h-2 mr-3">
@@ -968,45 +1088,52 @@ function PrinterCard({
             )}
 
             {/* Temperatures */}
-            {status.temperatures && viewMode === 'expanded' && (
-              <div className="grid grid-cols-3 gap-3">
-                {/* Nozzle temp - combined for dual nozzle */}
-                <div className="text-center p-2 bg-bambu-dark rounded-lg">
-                  <Thermometer className="w-4 h-4 mx-auto mb-1 text-orange-400" />
-                  {status.temperatures.nozzle_2 !== undefined ? (
-                    <>
-                      <p className="text-xs text-bambu-gray">Left / Right</p>
-                      <p className="text-sm text-white">
-                        {Math.round(status.temperatures.nozzle || 0)}°C / {Math.round(status.temperatures.nozzle_2 || 0)}°C
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-xs text-bambu-gray">Nozzle</p>
-                      <p className="text-sm text-white">
-                        {Math.round(status.temperatures.nozzle || 0)}°C
-                      </p>
-                    </>
-                  )}
-                </div>
-                <div className="text-center p-2 bg-bambu-dark rounded-lg">
-                  <Thermometer className="w-4 h-4 mx-auto mb-1 text-blue-400" />
-                  <p className="text-xs text-bambu-gray">Bed</p>
-                  <p className="text-sm text-white">
-                    {Math.round(status.temperatures.bed || 0)}°C
-                  </p>
-                </div>
-                {status.temperatures.chamber !== undefined && (
+            {status.temperatures && viewMode === 'expanded' && (() => {
+              // Use actual heater states from MQTT stream
+              const nozzleHeating = status.temperatures.nozzle_heating || status.temperatures.nozzle_2_heating || false;
+              const bedHeating = status.temperatures.bed_heating || false;
+              const chamberHeating = status.temperatures.chamber_heating || false;
+
+              return (
+                <div className="grid grid-cols-3 gap-3">
+                  {/* Nozzle temp - combined for dual nozzle */}
                   <div className="text-center p-2 bg-bambu-dark rounded-lg">
-                    <Thermometer className="w-4 h-4 mx-auto mb-1 text-green-400" />
-                    <p className="text-xs text-bambu-gray">Chamber</p>
+                    <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-orange-400" isHeating={nozzleHeating} />
+                    {status.temperatures.nozzle_2 !== undefined ? (
+                      <>
+                        <p className="text-xs text-bambu-gray">Left / Right</p>
+                        <p className="text-sm text-white">
+                          {Math.round(status.temperatures.nozzle || 0)}°C / {Math.round(status.temperatures.nozzle_2 || 0)}°C
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-bambu-gray">Nozzle</p>
+                        <p className="text-sm text-white">
+                          {Math.round(status.temperatures.nozzle || 0)}°C
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  <div className="text-center p-2 bg-bambu-dark rounded-lg">
+                    <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-blue-400" isHeating={bedHeating} />
+                    <p className="text-xs text-bambu-gray">Bed</p>
                     <p className="text-sm text-white">
-                      {Math.round(status.temperatures.chamber || 0)}°C
+                      {Math.round(status.temperatures.bed || 0)}°C
                     </p>
                   </div>
-                )}
-              </div>
-            )}
+                  {status.temperatures.chamber !== undefined && (
+                    <div className="text-center p-2 bg-bambu-dark rounded-lg">
+                      <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-green-400" isHeating={chamberHeating} />
+                      <p className="text-xs text-bambu-gray">Chamber</p>
+                      <p className="text-sm text-white">
+                        {Math.round(status.temperatures.chamber || 0)}°C
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* AMS Units with Device Icons, Humidity & Temperature */}
             {amsData && amsData.length > 0 && viewMode === 'expanded' && (
@@ -1034,9 +1161,9 @@ function PrinterCard({
 
                   return (
                     <div key={ams.id} className="p-2 bg-bambu-dark rounded-lg">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                         {/* Nozzle badge + AMS device icon */}
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           {isDualNozzle && (isLeftNozzle || isRightNozzle) && (
                             <NozzleBadge side={isLeftNozzle ? 'L' : 'R'} />
                           )}
@@ -1063,7 +1190,7 @@ function PrinterCard({
                             {ams.tray.map((tray, i) => (
                               <div key={i} className="flex items-start">
                                 <div className="flex flex-col">
-                                  <span className="text-bambu-gray/70 truncate">
+                                  <span className="text-bambu-gray/70 truncate max-w-[60px] sm:max-w-none">
                                     {tray.tray_type ? (tray.tray_sub_brands || tray.tray_type) : '—'}
                                   </span>
                                   <span className="text-bambu-gray/50 truncate">
@@ -1080,9 +1207,9 @@ function PrinterCard({
                             ))}
                           </div>
                         </div>
-                        {/* Humidity/temp - vertically centered */}
+                        {/* Humidity/temp - responsive positioning */}
                         {(ams.humidity != null || ams.temp != null) && (
-                          <div className="flex items-center gap-2 text-xs flex-shrink-0">
+                          <div className="flex items-center gap-2 text-xs flex-shrink-0 ml-auto">
                             {ams.humidity != null && (
                               <HumidityIndicator
                                 humidity={ams.humidity}
@@ -1349,9 +1476,11 @@ function PrinterCard({
 function AddPrinterModal({
   onClose,
   onAdd,
+  existingSerials,
 }: {
   onClose: () => void;
   onAdd: (data: PrinterCreate) => void;
+  existingSerials: string[];
 }) {
   const [form, setForm] = useState<PrinterCreate>({
     name: '',
@@ -1361,6 +1490,153 @@ function AddPrinterModal({
     model: '',
     auto_archive: true,
   });
+
+  // Discovery state
+  const [discovering, setDiscovering] = useState(false);
+  const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([]);
+  const [discoveryError, setDiscoveryError] = useState('');
+  const [hasScanned, setHasScanned] = useState(false);
+  const [isDocker, setIsDocker] = useState(false);
+  const [subnet, setSubnet] = useState('192.168.1.0/24');
+  const [scanProgress, setScanProgress] = useState({ scanned: 0, total: 0 });
+
+  // Fetch discovery info on mount
+  useEffect(() => {
+    discoveryApi.getInfo().then(info => {
+      setIsDocker(info.is_docker);
+    }).catch(() => {
+      // Ignore errors, assume not Docker
+    });
+  }, []);
+
+  // Filter out already-added printers
+  const newPrinters = discovered.filter(p => !existingSerials.includes(p.serial));
+
+  const startDiscovery = async () => {
+    setDiscoveryError('');
+    setDiscovered([]);
+    setDiscovering(true);
+    setHasScanned(false);
+    setScanProgress({ scanned: 0, total: 0 });
+
+    try {
+      if (isDocker) {
+        // Use subnet scanning for Docker
+        await discoveryApi.startSubnetScan(subnet);
+
+        // Poll for scan status and results
+        const pollInterval = setInterval(async () => {
+          try {
+            const status = await discoveryApi.getScanStatus();
+            setScanProgress({ scanned: status.scanned, total: status.total });
+
+            const printers = await discoveryApi.getDiscoveredPrinters();
+            setDiscovered(printers);
+
+            if (!status.running) {
+              clearInterval(pollInterval);
+              setDiscovering(false);
+              setHasScanned(true);
+            }
+          } catch (e) {
+            console.error('Failed to get scan status:', e);
+          }
+        }, 500);
+      } else {
+        // Use SSDP discovery for native installs
+        await discoveryApi.startDiscovery(10);
+
+        // Poll for discovered printers every second
+        const pollInterval = setInterval(async () => {
+          try {
+            const printers = await discoveryApi.getDiscoveredPrinters();
+            setDiscovered(printers);
+          } catch (e) {
+            console.error('Failed to get discovered printers:', e);
+          }
+        }, 1000);
+
+        // Stop after 10 seconds
+        setTimeout(async () => {
+          clearInterval(pollInterval);
+          try {
+            await discoveryApi.stopDiscovery();
+          } catch (e) {
+            // Ignore stop errors
+          }
+          setDiscovering(false);
+          setHasScanned(true);
+          // Final fetch
+          try {
+            const printers = await discoveryApi.getDiscoveredPrinters();
+            setDiscovered(printers);
+          } catch (e) {
+            console.error('Failed to get final discovered printers:', e);
+          }
+        }, 10000);
+      }
+    } catch (e) {
+      console.error('Failed to start discovery:', e);
+      setDiscoveryError(e instanceof Error ? e.message : 'Failed to start discovery');
+      setDiscovering(false);
+      setHasScanned(true);
+    }
+  };
+
+  // Map SSDP model codes to dropdown values
+  const mapModelCode = (ssdpModel: string | null): string => {
+    if (!ssdpModel) return '';
+    const modelMap: Record<string, string> = {
+      // H2 Series
+      'O1D': 'H2D',
+      'O1C': 'H2C',
+      'O1S': 'H2S',
+      // X1 Series
+      'BL-P001': 'X1C',
+      'BL-P002': 'X1',
+      'BL-P003': 'X1E',
+      // P Series
+      'C11': 'P1S',
+      'C12': 'P1P',
+      'C13': 'P2S',
+      // A1 Series
+      'N2S': 'A1',
+      'N1': 'A1 Mini',
+      // Direct matches
+      'X1C': 'X1C',
+      'X1': 'X1',
+      'X1E': 'X1E',
+      'P1S': 'P1S',
+      'P1P': 'P1P',
+      'P2S': 'P2S',
+      'A1': 'A1',
+      'A1 Mini': 'A1 Mini',
+      'H2D': 'H2D',
+      'H2C': 'H2C',
+      'H2S': 'H2S',
+    };
+    return modelMap[ssdpModel] || ssdpModel;
+  };
+
+  const selectPrinter = (printer: DiscoveredPrinter) => {
+    setForm({
+      ...form,
+      name: printer.name || '',
+      serial_number: printer.serial,
+      ip_address: printer.ip_address,
+      model: mapModelCode(printer.model),
+    });
+    // Clear discovery results after selection
+    setDiscovered([]);
+  };
+
+  // Cleanup discovery on unmount
+  useEffect(() => {
+    return () => {
+      discoveryApi.stopDiscovery().catch(() => {});
+      discoveryApi.stopSubnetScan().catch(() => {});
+    };
+  }, []);
 
   // Close on Escape key
   useEffect(() => {
@@ -1379,6 +1655,95 @@ function AddPrinterModal({
       <Card className="w-full max-w-md" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
         <CardContent>
           <h2 className="text-xl font-semibold mb-4">Add Printer</h2>
+
+          {/* Discovery Section */}
+          <div className="mb-4 pb-4 border-b border-bambu-dark-tertiary">
+            {isDocker && (
+              <div className="mb-3">
+                <label className="block text-sm text-bambu-gray mb-1">
+                  Subnet to scan
+                </label>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
+                  value={subnet}
+                  onChange={(e) => setSubnet(e.target.value)}
+                  placeholder="192.168.1.0/24"
+                  disabled={discovering}
+                />
+                <p className="mt-1 text-xs text-bambu-gray">
+                  Docker detected. Enter your printer's subnet in CIDR notation.
+                  Requires <code className="text-bambu-green">network_mode: host</code> in docker-compose.yml.
+                </p>
+              </div>
+            )}
+
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={startDiscovery}
+              disabled={discovering}
+              className="w-full"
+            >
+              {discovering ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {isDocker && scanProgress.total > 0
+                    ? `Scanning... ${scanProgress.scanned}/${scanProgress.total}`
+                    : 'Scanning...'}
+                </>
+              ) : (
+                <>
+                  <Search className="w-4 h-4" />
+                  {isDocker ? 'Scan Subnet for Printers' : 'Discover Printers on Network'}
+                </>
+              )}
+            </Button>
+
+            {discoveryError && (
+              <div className="mt-2 text-sm text-red-400">{discoveryError}</div>
+            )}
+
+            {newPrinters.length > 0 && (
+              <div className="mt-3 space-y-2 max-h-40 overflow-y-auto">
+                {newPrinters.map((printer) => (
+                  <div
+                    key={printer.serial}
+                    className="flex items-center justify-between p-2 bg-bambu-dark rounded-lg hover:bg-bambu-dark-secondary cursor-pointer transition-colors"
+                    onClick={() => selectPrinter(printer)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-white text-sm truncate">
+                        {printer.name || printer.serial}
+                      </p>
+                      <p className="text-xs text-bambu-gray truncate">
+                        {mapModelCode(printer.model) || 'Unknown'} • {printer.ip_address}
+                      </p>
+                    </div>
+                    <ChevronDown className="w-4 h-4 text-bambu-gray -rotate-90 flex-shrink-0 ml-2" />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {discovering && (
+              <p className="mt-2 text-sm text-bambu-gray text-center">
+                {isDocker ? 'Scanning subnet for Bambu printers...' : 'Scanning network...'}
+              </p>
+            )}
+
+            {hasScanned && !discovering && discovered.length === 0 && (
+              <p className="mt-2 text-sm text-bambu-gray text-center">
+                No printers found{isDocker ? ' in the specified subnet' : ' on the network'}.
+              </p>
+            )}
+
+            {hasScanned && !discovering && discovered.length > 0 && newPrinters.length === 0 && (
+              <p className="mt-2 text-sm text-bambu-gray text-center">
+                All discovered printers are already configured.
+              </p>
+            )}
+          </div>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -2076,6 +2441,7 @@ export function PrintersPage() {
         <AddPrinterModal
           onClose={() => setShowAddModal(false)}
           onAdd={(data) => addMutation.mutate(data)}
+          existingSerials={printers?.map(p => p.serial_number) || []}
         />
       )}
     </div>

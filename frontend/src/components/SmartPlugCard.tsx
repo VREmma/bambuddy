@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { Plug, Power, PowerOff, Loader2, Trash2, Settings2, Thermometer, Clock, Wifi, WifiOff, Edit2, Bell, Calendar } from 'lucide-react';
+import { Plug, Power, PowerOff, Loader2, Trash2, Settings2, Thermometer, Clock, Wifi, WifiOff, Edit2, Bell, Calendar, LayoutGrid } from 'lucide-react';
 import { api } from '../api/client';
 import type { SmartPlug, SmartPlugUpdate } from '../api/client';
 import { Card, CardContent } from './Card';
@@ -169,6 +169,26 @@ export function SmartPlugCard({ plug, onEdit }: SmartPlugCardProps) {
           {/* Expanded Settings */}
           {isExpanded && (
             <div className="pt-3 border-t border-bambu-dark-tertiary space-y-4">
+              {/* Show in Switchbar Toggle */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <LayoutGrid className="w-4 h-4 text-bambu-green" />
+                  <div>
+                    <p className="text-sm text-white">Show in Switchbar</p>
+                    <p className="text-xs text-bambu-gray">Quick access from sidebar</p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={plug.show_in_switchbar}
+                    onChange={(e) => updateMutation.mutate({ show_in_switchbar: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-bambu-green"></div>
+                </label>
+              </div>
+
               {/* Enabled Toggle */}
               <div className="flex items-center justify-between">
                 <div>

@@ -526,8 +526,23 @@ function ArchiveCard({
         <h3 className="font-medium text-white mb-1 truncate">
           {archive.print_name || archive.filename}
         </h3>
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
           <p className="text-xs text-bambu-gray">{printerName}</p>
+          {/* File type badge */}
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+              archive.filename?.toLowerCase().includes('.gcode.')
+                ? 'bg-bambu-green/20 text-bambu-green'
+                : 'bg-orange-500/20 text-orange-400'
+            }`}
+            title={
+              archive.filename?.toLowerCase().includes('.gcode.')
+                ? 'Sliced file - ready to print'
+                : 'Source file only - no AMS mapping available'
+            }
+          >
+            {archive.filename?.toLowerCase().includes('.gcode.') ? 'GCODE' : 'SOURCE'}
+          </span>
           {archive.project_name && (
             <span
               className="text-xs px-1.5 py-0.5 rounded-full truncate max-w-[120px]"
@@ -785,7 +800,12 @@ function ArchiveCard({
           src={api.getArchiveTimelapse(archive.id)}
           title={`${archive.print_name || archive.filename} - Timelapse`}
           downloadFilename={`${archive.print_name || archive.filename}_timelapse.mp4`}
+          archiveId={archive.id}
           onClose={() => setShowTimelapse(false)}
+          onEdit={() => {
+            queryClient.invalidateQueries({ queryKey: ['archives'] });
+            setShowTimelapse(false);  // Close viewer to reload fresh video
+          }}
         />
       )}
 

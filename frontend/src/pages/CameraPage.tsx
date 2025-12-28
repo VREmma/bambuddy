@@ -1,8 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { RefreshCw, AlertTriangle, Camera, Maximize, Minimize } from 'lucide-react';
+import { RefreshCw, AlertTriangle, Camera, Maximize, Minimize, WifiOff } from 'lucide-react';
 import { api } from '../api/client';
+
+const MAX_RECONNECT_ATTEMPTS = 5;
+const INITIAL_RECONNECT_DELAY = 2000; // 2 seconds
+const MAX_RECONNECT_DELAY = 30000; // 30 seconds
 
 export function CameraPage() {
   const { printerId } = useParams<{ printerId: string }>();
@@ -14,8 +18,13 @@ export function CameraPage() {
   const [imageKey, setImageKey] = useState(Date.now());
   const [transitioning, setTransitioning] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [reconnectCountdown, setReconnectCountdown] = useState(0);
   const imgRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch printer info for the title
   const { data: printer } = useQuery({
@@ -91,14 +100,84 @@ export function CameraPage() {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
+  // Clean up reconnect timers on unmount
+  useEffect(() => {
+    return () => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+      }
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Auto-reconnect logic
+  const attemptReconnect = useCallback(() => {
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      setIsReconnecting(false);
+      setStreamError(true);
+      return;
+    }
+
+    // Calculate delay with exponential backoff
+    const delay = Math.min(
+      INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts),
+      MAX_RECONNECT_DELAY
+    );
+
+    setIsReconnecting(true);
+    setReconnectCountdown(Math.ceil(delay / 1000));
+
+    // Countdown timer
+    countdownIntervalRef.current = setInterval(() => {
+      setReconnectCountdown((prev) => {
+        if (prev <= 1) {
+          if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // Reconnect after delay
+    reconnectTimerRef.current = setTimeout(() => {
+      setReconnectAttempts((prev) => prev + 1);
+      setIsReconnecting(false);
+      setStreamLoading(true);
+      setStreamError(false);
+      if (imgRef.current) {
+        imgRef.current.src = '';
+      }
+      setImageKey(Date.now());
+    }, delay);
+  }, [reconnectAttempts]);
+
   const handleStreamError = () => {
-    setStreamError(true);
     setStreamLoading(false);
+
+    // Only auto-reconnect for live stream mode
+    if (streamMode === 'stream' && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      attemptReconnect();
+    } else {
+      setStreamError(true);
+    }
   };
 
   const handleStreamLoad = () => {
     setStreamLoading(false);
     setStreamError(false);
+    // Reset reconnect attempts on successful connection
+    setReconnectAttempts(0);
+    setIsReconnecting(false);
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+    }
   };
 
   const stopStream = () => {
@@ -112,6 +191,15 @@ export function CameraPage() {
     setTransitioning(true);
     setStreamLoading(true);
     setStreamError(false);
+    // Reset reconnect state on mode switch
+    setReconnectAttempts(0);
+    setIsReconnecting(false);
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+    }
 
     if (imgRef.current) {
       imgRef.current.src = '';
@@ -134,6 +222,15 @@ export function CameraPage() {
     setTransitioning(true);
     setStreamLoading(true);
     setStreamError(false);
+    // Reset reconnect state on manual refresh
+    setReconnectAttempts(0);
+    setIsReconnecting(false);
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+    }
 
     if (imgRef.current) {
       imgRef.current.src = '';
@@ -165,7 +262,7 @@ export function CameraPage() {
       ? `/api/v1/printers/${id}/camera/stream?fps=10&t=${imageKey}`
       : `/api/v1/printers/${id}/camera/snapshot?t=${imageKey}`;
 
-  const isDisabled = streamLoading || transitioning;
+  const isDisabled = streamLoading || transitioning || isReconnecting;
 
   if (!id) {
     return (
@@ -234,7 +331,7 @@ export function CameraPage() {
       {/* Video area */}
       <div className="flex-1 flex items-center justify-center p-2">
         <div className="relative w-full h-full flex items-center justify-center">
-          {(streamLoading || transitioning) && (
+          {(streamLoading || transitioning) && !isReconnecting && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
               <div className="text-center">
                 <RefreshCw className="w-8 h-8 text-bambu-gray animate-spin mx-auto mb-2" />
@@ -244,7 +341,24 @@ export function CameraPage() {
               </div>
             </div>
           )}
-          {streamError && (
+          {isReconnecting && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
+              <div className="text-center p-4">
+                <WifiOff className="w-10 h-10 text-orange-400 mx-auto mb-3" />
+                <p className="text-white mb-2">Connection lost</p>
+                <p className="text-sm text-bambu-gray mb-3">
+                  Reconnecting in {reconnectCountdown}s... (attempt {reconnectAttempts + 1}/{MAX_RECONNECT_ATTEMPTS})
+                </p>
+                <button
+                  onClick={refresh}
+                  className="px-4 py-2 bg-bambu-green text-white text-sm rounded hover:bg-bambu-green/80 transition-colors"
+                >
+                  Reconnect now
+                </button>
+              </div>
+            </div>
+          )}
+          {streamError && !isReconnecting && (
             <div className="absolute inset-0 flex items-center justify-center bg-black z-10">
               <div className="text-center p-4">
                 <AlertTriangle className="w-12 h-12 text-orange-400 mx-auto mb-3" />

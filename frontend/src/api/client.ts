@@ -14,7 +14,11 @@ async function request<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || `HTTP ${response.status}`);
+    const detail = error.detail;
+    const message = typeof detail === 'string'
+      ? detail
+      : (detail ? JSON.stringify(detail) : `HTTP ${response.status}`);
+    throw new Error(message);
   }
 
   return response.json();
@@ -106,11 +110,16 @@ export interface PrinterStatus {
   temperatures: {
     bed?: number;
     bed_target?: number;
+    bed_heating?: boolean;  // Actual heater state from MQTT
     nozzle?: number;
     nozzle_target?: number;
+    nozzle_heating?: boolean;  // Actual heater state from MQTT
     nozzle_2?: number;  // Second nozzle for H2 series (dual nozzle)
     nozzle_2_target?: number;
+    nozzle_2_heating?: boolean;  // Actual heater state from MQTT
     chamber?: number;
+    chamber_target?: number;
+    chamber_heating?: boolean;  // Actual heater state from MQTT
   } | null;
   cover_url: string | null;
   hms_errors: HMSError[];
@@ -328,6 +337,20 @@ export interface ProjectStats {
   total_print_time_hours: number;
   total_filament_grams: number;
   progress_percent: number | null;
+  estimated_cost: number;
+  total_energy_kwh: number;
+  total_energy_cost: number;
+  remaining_prints: number | null;
+  bom_total_items: number;
+  bom_completed_items: number;
+}
+
+export interface ProjectChildPreview {
+  id: number;
+  name: string;
+  color: string | null;
+  status: string;
+  progress_percent: number | null;
 }
 
 export interface Project {
@@ -337,9 +360,27 @@ export interface Project {
   color: string | null;
   status: string;  // active, completed, archived
   target_count: number | null;
+  notes: string | null;
+  attachments: ProjectAttachment[] | null;
+  tags: string | null;
+  due_date: string | null;
+  priority: string;  // low, normal, high, urgent
+  budget: number | null;
+  is_template: boolean;
+  template_source_id: number | null;
+  parent_id: number | null;
+  parent_name: string | null;
+  children: ProjectChildPreview[];
   created_at: string;
   updated_at: string;
   stats?: ProjectStats;
+}
+
+export interface ProjectAttachment {
+  filename: string;
+  original_name: string;
+  size: number;
+  uploaded_at: string;
 }
 
 export interface ArchivePreview {
@@ -347,6 +388,8 @@ export interface ArchivePreview {
   print_name: string | null;
   thumbnail_path: string | null;
   status: string;
+  filament_type: string | null;
+  filament_color: string | null;
 }
 
 export interface ProjectListItem {
@@ -368,6 +411,12 @@ export interface ProjectCreate {
   description?: string;
   color?: string;
   target_count?: number;
+  notes?: string;
+  tags?: string;
+  due_date?: string;
+  priority?: string;
+  budget?: number;
+  parent_id?: number;
 }
 
 export interface ProjectUpdate {
@@ -376,6 +425,61 @@ export interface ProjectUpdate {
   color?: string;
   status?: string;
   target_count?: number;
+  notes?: string;
+  tags?: string;
+  due_date?: string;
+  priority?: string;
+  budget?: number;
+  parent_id?: number;
+}
+
+// BOM Types - Tracks sourced/purchased parts (hardware, electronics, etc.)
+export interface BOMItem {
+  id: number;
+  project_id: number;
+  name: string;
+  quantity_needed: number;
+  quantity_acquired: number;
+  unit_price: number | null;
+  sourcing_url: string | null;
+  archive_id: number | null;
+  archive_name: string | null;
+  stl_filename: string | null;
+  remarks: string | null;
+  sort_order: number;
+  is_complete: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BOMItemCreate {
+  name: string;
+  quantity_needed?: number;
+  unit_price?: number;
+  sourcing_url?: string;
+  archive_id?: number;
+  stl_filename?: string;
+  remarks?: string;
+}
+
+export interface BOMItemUpdate {
+  name?: string;
+  quantity_needed?: number;
+  quantity_acquired?: number;
+  unit_price?: number;
+  sourcing_url?: string;
+  archive_id?: number;
+  stl_filename?: string;
+  remarks?: string;
+}
+
+// Timeline Types
+export interface TimelineEvent {
+  event_type: string;
+  timestamp: string;
+  title: string;
+  description: string | null;
+  metadata: Record<string, unknown> | null;
 }
 
 // API Key types
@@ -559,6 +663,8 @@ export interface SmartPlug {
   schedule_enabled: boolean;
   schedule_on_time: string | null;
   schedule_off_time: string | null;
+  // Switchbar visibility
+  show_in_switchbar: boolean;
   // Status
   last_state: string | null;
   last_checked: string | null;
@@ -587,6 +693,8 @@ export interface SmartPlugCreate {
   schedule_enabled?: boolean;
   schedule_on_time?: string | null;
   schedule_off_time?: string | null;
+  // Switchbar visibility
+  show_in_switchbar?: boolean;
 }
 
 export interface SmartPlugUpdate {
@@ -609,6 +717,8 @@ export interface SmartPlugUpdate {
   schedule_enabled?: boolean;
   schedule_on_time?: string | null;
   schedule_off_time?: string | null;
+  // Switchbar visibility
+  show_in_switchbar?: boolean;
 }
 
 export interface SmartPlugEnergy {
@@ -634,6 +744,21 @@ export interface SmartPlugTestResult {
   success: boolean;
   state: string | null;
   device_name: string | null;
+}
+
+// Tasmota Discovery types
+export interface TasmotaScanStatus {
+  running: boolean;
+  scanned: number;
+  total: number;
+}
+
+export interface DiscoveredTasmotaDevice {
+  ip_address: string;
+  name: string;
+  module: number | null;
+  state: string | null;
+  discovered_at: string | null;
 }
 
 // Print Queue types
@@ -1121,8 +1246,11 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
-  deletePrinter: (id: number) =>
-    request<void>(`/printers/${id}`, { method: 'DELETE' }),
+  deletePrinter: (id: number, deleteArchives: boolean = true) =>
+    request<{ status: string; archives_deleted: boolean }>(
+      `/printers/${id}?delete_archives=${deleteArchives}`,
+      { method: 'DELETE' }
+    ),
   getPrinterStatus: (id: number) =>
     request<PrinterStatus>(`/printers/${id}/status`),
   connectPrinter: (id: number) =>
@@ -1301,7 +1429,7 @@ export const api = {
   getArchiveThumbnail: (id: number) => `${API_BASE}/archives/${id}/thumbnail`,
   getArchiveDownload: (id: number) => `${API_BASE}/archives/${id}/download`,
   getArchiveGcode: (id: number) => `${API_BASE}/archives/${id}/gcode`,
-  getArchiveTimelapse: (id: number) => `${API_BASE}/archives/${id}/timelapse`,
+  getArchiveTimelapse: (id: number) => `${API_BASE}/archives/${id}/timelapse?v=${Date.now()}`,
   scanArchiveTimelapse: (id: number) =>
     request<{
       status: string;
@@ -1320,6 +1448,56 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
     const response = await fetch(`${API_BASE}/archives/${archiveId}/timelapse/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+  // Timelapse Editor
+  getTimelapseInfo: (archiveId: number) =>
+    request<{
+      duration: number;
+      width: number;
+      height: number;
+      fps: number;
+      codec: string;
+      file_size: number;
+      has_audio: boolean;
+    }>(`/archives/${archiveId}/timelapse/info`),
+  getTimelapseThumbnails: (archiveId: number, count: number = 10) =>
+    request<{
+      thumbnails: string[];
+      timestamps: number[];
+    }>(`/archives/${archiveId}/timelapse/thumbnails?count=${count}`),
+  processTimelapse: async (
+    archiveId: number,
+    params: {
+      trimStart?: number;
+      trimEnd?: number;
+      speed?: number;
+      saveMode: 'replace' | 'new';
+      outputFilename?: string;
+    },
+    audioFile?: File
+  ): Promise<{ status: string; output_path: string | null; message: string }> => {
+    const formData = new FormData();
+    formData.append('trim_start', String(params.trimStart ?? 0));
+    if (params.trimEnd !== undefined) {
+      formData.append('trim_end', String(params.trimEnd));
+    }
+    formData.append('speed', String(params.speed ?? 1));
+    formData.append('save_mode', params.saveMode);
+    if (params.outputFilename) {
+      formData.append('output_filename', params.outputFilename);
+    }
+    if (audioFile) {
+      formData.append('audio', audioFile);
+    }
+    const response = await fetch(`${API_BASE}/archives/${archiveId}/timelapse/process`, {
       method: 'POST',
       body: formData,
     });
@@ -1423,6 +1601,18 @@ export const api = {
     `${API_BASE}/archives/${archiveId}/project-image/${encodeURIComponent(imagePath)}`,
   getArchiveForSlicer: (id: number, filename: string) =>
     `${API_BASE}/archives/${id}/file/${encodeURIComponent(filename.endsWith('.3mf') ? filename : filename + '.3mf')}`,
+  getArchiveFilamentRequirements: (archiveId: number) =>
+    request<{
+      archive_id: number;
+      filename: string;
+      filaments: Array<{
+        slot_id: number;
+        type: string;
+        color: string;
+        used_grams: number;
+        used_meters: number;
+      }>;
+    }>(`/archives/${archiveId}/filament-requirements`),
   reprintArchive: (archiveId: number, printerId: number) =>
     request<{ status: string; printer_id: number; archive_id: number; filename: string }>(
       `/archives/${archiveId}/reprint?printer_id=${printerId}`,
@@ -1477,10 +1667,12 @@ export const api = {
       if (categories.notifications !== undefined) params.set('include_notifications', String(categories.notifications));
       if (categories.templates !== undefined) params.set('include_templates', String(categories.templates));
       if (categories.smart_plugs !== undefined) params.set('include_smart_plugs', String(categories.smart_plugs));
+      if (categories.external_links !== undefined) params.set('include_external_links', String(categories.external_links));
       if (categories.printers !== undefined) params.set('include_printers', String(categories.printers));
       if (categories.filaments !== undefined) params.set('include_filaments', String(categories.filaments));
       if (categories.maintenance !== undefined) params.set('include_maintenance', String(categories.maintenance));
       if (categories.archives !== undefined) params.set('include_archives', String(categories.archives));
+      if (categories.projects !== undefined) params.set('include_projects', String(categories.projects));
       if (categories.access_codes !== undefined) params.set('include_access_codes', String(categories.access_codes));
     }
     const url = `${API_BASE}/settings/backup${params.toString() ? '?' + params.toString() : ''}`;
@@ -1589,6 +1781,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ip_address, username, password }),
     }),
+
+  // Tasmota Discovery (auto-detects network)
+  startTasmotaScan: () =>
+    fetch(`${API_BASE}/smart-plugs/discover/scan`, { method: 'POST' })
+      .then(res => res.ok ? res.json() : res.json().then(e => { throw new Error(e.detail || `HTTP ${res.status}`); })),
+  getTasmotaScanStatus: () =>
+    request<TasmotaScanStatus>('/smart-plugs/discover/status'),
+  stopTasmotaScan: () =>
+    fetch(`${API_BASE}/smart-plugs/discover/stop`, { method: 'POST' })
+      .then(res => res.ok ? res.json() : res.json().then(e => { throw new Error(e.detail || `HTTP ${res.status}`); })),
+  getDiscoveredTasmotaDevices: () =>
+    request<DiscoveredTasmotaDevice[]>('/smart-plugs/discover/devices'),
 
   // Print Queue
   getQueue: (printerId?: number, status?: string) => {
@@ -1819,6 +2023,14 @@ export const api = {
       `/maintenance/printers/${printerId}/hours?total_hours=${totalHours}`,
       { method: 'PATCH' }
     ),
+  assignMaintenanceType: (printerId: number, typeId: number) =>
+    request<MaintenanceStatus>(`/maintenance/printers/${printerId}/assign/${typeId}`, {
+      method: 'POST',
+    }),
+  removeMaintenanceItem: (itemId: number) =>
+    request<{ status: string }>(`/maintenance/items/${itemId}`, {
+      method: 'DELETE',
+    }),
 
   // Camera
   getCameraStreamUrl: (printerId: number, fps = 10) =>
@@ -1901,6 +2113,64 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ queue_item_ids: queueItemIds }),
     }),
+
+  // Project Attachments
+  uploadProjectAttachment: async (projectId: number, file: File): Promise<{
+    status: string;
+    filename: string;
+    original_name: string;
+    attachments: ProjectAttachment[];
+  }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`${API_BASE}/projects/${projectId}/attachments`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+  getProjectAttachmentUrl: (projectId: number, filename: string) =>
+    `${API_BASE}/projects/${projectId}/attachments/${encodeURIComponent(filename)}`,
+  deleteProjectAttachment: (projectId: number, filename: string) =>
+    request<{ status: string; message: string; attachments: ProjectAttachment[] | null }>(
+      `/projects/${projectId}/attachments/${encodeURIComponent(filename)}`,
+      { method: 'DELETE' }
+    ),
+
+  // BOM (Bill of Materials)
+  getProjectBOM: (projectId: number) =>
+    request<BOMItem[]>(`/projects/${projectId}/bom`),
+  createBOMItem: (projectId: number, data: BOMItemCreate) =>
+    request<BOMItem>(`/projects/${projectId}/bom`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateBOMItem: (projectId: number, itemId: number, data: BOMItemUpdate) =>
+    request<BOMItem>(`/projects/${projectId}/bom/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteBOMItem: (projectId: number, itemId: number) =>
+    request<{ status: string; message: string }>(`/projects/${projectId}/bom/${itemId}`, {
+      method: 'DELETE',
+    }),
+
+  // Templates
+  getTemplates: () => request<ProjectListItem[]>('/projects/templates/'),
+  createTemplateFromProject: (projectId: number) =>
+    request<Project>(`/projects/${projectId}/create-template`, { method: 'POST' }),
+  createProjectFromTemplate: (templateId: number, name?: string) =>
+    request<Project>(`/projects/from-template/${templateId}${name ? `?name=${encodeURIComponent(name)}` : ''}`, {
+      method: 'POST',
+    }),
+
+  // Timeline
+  getProjectTimeline: (projectId: number, limit = 50) =>
+    request<TimelineEvent[]>(`/projects/${projectId}/timeline?limit=${limit}`),
 
   // API Keys
   getAPIKeys: () => request<APIKey[]>('/api-keys/'),
@@ -2015,3 +2285,56 @@ export interface SystemInfo {
     percent: number;
   };
 }
+
+// Discovery types
+export interface DiscoveredPrinter {
+  serial: string;
+  name: string;
+  ip_address: string;
+  model: string | null;
+  discovered_at: string | null;
+}
+
+export interface DiscoveryStatus {
+  running: boolean;
+}
+
+export interface DiscoveryInfo {
+  is_docker: boolean;
+  ssdp_running: boolean;
+  scan_running: boolean;
+}
+
+export interface SubnetScanStatus {
+  running: boolean;
+  scanned: number;
+  total: number;
+}
+
+// Discovery API
+export const discoveryApi = {
+  getInfo: () => request<DiscoveryInfo>('/discovery/info'),
+
+  getStatus: () => request<DiscoveryStatus>('/discovery/status'),
+
+  startDiscovery: (duration: number = 10) =>
+    request<DiscoveryStatus>(`/discovery/start?duration=${duration}`, { method: 'POST' }),
+
+  stopDiscovery: () =>
+    request<DiscoveryStatus>('/discovery/stop', { method: 'POST' }),
+
+  getDiscoveredPrinters: () =>
+    request<DiscoveredPrinter[]>('/discovery/printers'),
+
+  // Subnet scanning (for Docker environments)
+  startSubnetScan: (subnet: string, timeout: number = 1.0) =>
+    request<SubnetScanStatus>('/discovery/scan', {
+      method: 'POST',
+      body: JSON.stringify({ subnet, timeout }),
+    }),
+
+  getScanStatus: () => request<SubnetScanStatus>('/discovery/scan/status'),
+
+  stopSubnetScan: () =>
+    request<SubnetScanStatus>('/discovery/scan/stop', { method: 'POST' }),
+};

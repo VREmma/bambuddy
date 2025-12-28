@@ -974,9 +974,10 @@ class BambuMQTTClient:
 
         # Standard nozzle fields: these are for the RIGHT/default nozzle on H2D
         # For H2D, we use these for nozzle_2 (RIGHT), for others use as nozzle (primary)
+        # NOTE: On H2D, nozzle_temper seems to mirror left nozzle - we override with extruder_info[0] later
         if "nozzle_temper" in data:
             if has_h2d_extruder_info:
-                temps["nozzle_2"] = float(data["nozzle_temper"])  # RIGHT nozzle on H2D
+                temps["nozzle_2"] = float(data["nozzle_temper"])  # Will be overridden by extruder_info[0]
             else:
                 temps["nozzle"] = float(data["nozzle_temper"])
         if "nozzle_target_temper" in data:
@@ -1089,21 +1090,28 @@ class BambuMQTTClient:
                 extruder_info = extruder_data.get("info", [])
                 if isinstance(extruder_info, list) and len(extruder_info) >= 1:
                     # H2D nozzle mapping: id=0 is RIGHT nozzle (default), id=1 is LEFT nozzle
-                    # RIGHT nozzle uses standard nozzle_temper/nozzle_target_temper fields (already parsed above)
-                    # LEFT nozzle uses extruder_info[1] - no standard fields available
-                    # Note: hnow/htar flags are unreliable (static values, not actual heating state)
-                    # Real heating indicator: temp > 500 means encoded (target*65536+current)
-                    # Heating = target > 0 AND current < target
-                    # Right nozzle (extruder 0)
-                    if len(extruder_info) >= 1 and "temp" in extruder_info[0]:
-                        temp_val = extruder_info[0]["temp"]
-                        if temp_val > 500:
-                            target = temp_val // 65536
-                            current = temp_val % 65536
-                            temps["nozzle_2_heating"] = target > 0 and current < target
-                        else:
-                            temps["nozzle_2_heating"] = False
-                    # Left nozzle (extruder 1)
+                    # Only parse dual nozzle temps if this is actually a dual nozzle printer (H2D)
+                    # has_h2d_extruder_info requires len(extruder_info) >= 2
+                    if has_h2d_extruder_info:
+                        # Right nozzle (extruder 0) - use extruder_info for actual temp, not nozzle_temper
+                        # nozzle_temper field seems to mirror left nozzle on H2D, so use extruder_info[0]
+                        if "temp" in extruder_info[0]:
+                            temp_val = extruder_info[0]["temp"]
+                            if temp_val > 500:
+                                # Encoded format: temp = target * 65536 + current
+                                target = temp_val // 65536
+                                current = temp_val % 65536
+                                if -50 < current < 500:
+                                    temps["nozzle_2"] = float(current)
+                                if 0 < target < 500:
+                                    temps["nozzle_2_target"] = float(target)
+                                temps["nozzle_2_heating"] = target > 0 and current < target
+                            elif -50 < temp_val < 500:
+                                # Direct Celsius value = heater is OFF
+                                temps["nozzle_2"] = float(temp_val)
+                                temps["nozzle_2_target"] = 0.0
+                                temps["nozzle_2_heating"] = False
+                    # Left nozzle (extruder 1) - only for dual nozzle printers
                     # H2D protocol: temp field encoding depends on value
                     # - When > 500: encoded as (target * 65536 + current) - heater is ON
                     # - When < 500: direct Celsius current temp only - heater is OFF
@@ -1254,6 +1262,13 @@ class BambuMQTTClient:
                 logger.debug(
                     f"[{self.serial_number}] Chamber temp updated to: {self.state.temperatures.get('chamber')}, target: {self.state.temperatures.get('chamber_target')}, heating: {self.state.temperatures.get('chamber_heating')}"
                 )
+
+            # Calculate nozzle_heating for single nozzle printers (not set by H2D parsing)
+            # For H2D, nozzle_heating is set in temps dict; for single nozzle, calculate here
+            if "nozzle" in temps and "nozzle_heating" not in temps:
+                current = self.state.temperatures.get("nozzle", 0)
+                target = self.state.temperatures.get("nozzle_target", 0)
+                self.state.temperatures["nozzle_heating"] = target > 0 and current < target
 
         # Parse HMS (Health Management System) errors
         if "hms" in data:

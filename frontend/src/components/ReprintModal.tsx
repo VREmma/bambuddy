@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { X, Printer, Loader2 } from 'lucide-react';
+import { X, Printer, Loader2, AlertTriangle, Check, Circle } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
@@ -29,6 +29,19 @@ export function ReprintModal({ archiveId, archiveName, onClose, onSuccess }: Rep
     queryFn: api.getPrinters,
   });
 
+  // Fetch filament requirements from the archived 3MF
+  const { data: filamentReqs } = useQuery({
+    queryKey: ['archive-filaments', archiveId],
+    queryFn: () => api.getArchiveFilamentRequirements(archiveId),
+  });
+
+  // Fetch printer status when a printer is selected
+  const { data: printerStatus } = useQuery({
+    queryKey: ['printer-status', selectedPrinter],
+    queryFn: () => api.getPrinterStatus(selectedPrinter!),
+    enabled: !!selectedPrinter,
+  });
+
   const reprintMutation = useMutation({
     mutationFn: () => {
       if (!selectedPrinter) throw new Error('No printer selected');
@@ -41,6 +54,109 @@ export function ReprintModal({ archiveId, archiveName, onClose, onSuccess }: Rep
   });
 
   const activePrinters = printers?.filter((p) => p.is_active) || [];
+
+  // Build a map of AMS slot positions to loaded filaments
+  // Bambu Lab slot numbering: slot = amsId * 4 + trayId + 1 (for regular AMS)
+  // AMS-HT (id >= 128) is special - uses its position in the array
+  // External spool: slot 254, No filament: slot 255
+  const loadedFilaments = useMemo(() => {
+    if (!printerStatus?.ams) return new Map<number, { type: string; color: string }>();
+
+    const map = new Map<number, { type: string; color: string }>();
+
+    // Sort AMS units by ID to get consistent ordering, filter out AMS-HT for now
+    const regularAms = printerStatus.ams
+      .filter((ams) => ams.id < 128)
+      .sort((a, b) => a.id - b.id);
+
+    // Helper to normalize color format (API returns "RRGGBBAA", 3MF uses "#RRGGBB")
+    const normalizeColor = (color: string | null | undefined): string => {
+      if (!color) return '#808080';
+      // Remove alpha channel if present (8-char hex to 6-char)
+      const hex = color.replace('#', '').substring(0, 6);
+      return `#${hex}`;
+    };
+
+    regularAms.forEach((amsUnit) => {
+      amsUnit.tray.forEach((tray) => {
+        // Calculate global slot ID (1-based to match 3MF)
+        // AMS 0 tray 0 = slot 1, AMS 0 tray 1 = slot 2, etc.
+        const globalSlotId = amsUnit.id * 4 + tray.id + 1;
+        if (tray.tray_type) {
+          map.set(globalSlotId, {
+            type: tray.tray_type,
+            color: normalizeColor(tray.tray_color),
+          });
+        }
+      });
+    });
+
+    // AMS-HT units get slots after regular AMS slots
+    const amsHtUnits = printerStatus.ams.filter((ams) => ams.id >= 128);
+    let htSlotBase = regularAms.length * 4 + 1;
+    amsHtUnits.forEach((amsUnit) => {
+      amsUnit.tray.forEach((tray) => {
+        if (tray.tray_type) {
+          map.set(htSlotBase + tray.id, {
+            type: tray.tray_type,
+            color: normalizeColor(tray.tray_color),
+          });
+        }
+      });
+      htSlotBase += amsUnit.tray.length;
+    });
+
+    // Add virtual tray (external spool) as slot 254 (Bambu standard)
+    if (printerStatus.vt_tray?.tray_type) {
+      map.set(254, {
+        type: printerStatus.vt_tray.tray_type,
+        color: normalizeColor(printerStatus.vt_tray.tray_color),
+      });
+    }
+    return map;
+  }, [printerStatus]);
+
+  // Compare required filaments with loaded filaments
+  const filamentComparison = useMemo(() => {
+    if (!filamentReqs?.filaments || filamentReqs.filaments.length === 0) return [];
+
+    // Helper to normalize color for comparison (case-insensitive, strip #)
+    const normalizeColorForCompare = (color: string | undefined): string => {
+      if (!color) return '';
+      return color.replace('#', '').toLowerCase();
+    };
+
+    return filamentReqs.filaments.map((req) => {
+      const loaded = loadedFilaments.get(req.slot_id);
+      const hasFilament = !!loaded;
+      const typeMatch = hasFilament && loaded?.type?.toUpperCase() === req.type?.toUpperCase();
+      const colorMatch = hasFilament && normalizeColorForCompare(loaded?.color) === normalizeColorForCompare(req.color);
+
+      // Status: match (both), type_only (type ok, color different), mismatch (type wrong), empty
+      let status: 'match' | 'type_only' | 'mismatch' | 'empty';
+      if (!hasFilament) {
+        status = 'empty';
+      } else if (typeMatch && colorMatch) {
+        status = 'match';
+      } else if (typeMatch) {
+        status = 'type_only'; // Same type, different color
+      } else {
+        status = 'mismatch'; // Different type
+      }
+
+      return {
+        ...req,
+        loaded,
+        hasFilament,
+        typeMatch,
+        colorMatch,
+        status,
+      };
+    });
+  }, [filamentReqs, loadedFilaments]);
+
+  const hasAnyMismatch = filamentComparison.some((f) => f.status !== 'match');
+  const hasEmptySlots = filamentComparison.some((f) => f.status === 'empty');
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-8">
@@ -102,6 +218,93 @@ export function ReprintModal({ archiveId, archiveName, onClose, onSuccess }: Rep
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* Filament comparison - show when printer selected and has filament requirements */}
+          {selectedPrinter && filamentComparison.length > 0 && (
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm text-bambu-gray">Filament Check</span>
+                {hasEmptySlots ? (
+                  <span className="text-xs text-orange-400 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    Empty slots
+                  </span>
+                ) : filamentComparison.some((f) => f.status === 'mismatch') ? (
+                  <span className="text-xs text-orange-400 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    Type mismatch
+                  </span>
+                ) : filamentComparison.some((f) => f.status === 'type_only') ? (
+                  <span className="text-xs text-yellow-400 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    Color mismatch
+                  </span>
+                ) : (
+                  <span className="text-xs text-bambu-green flex items-center gap-1">
+                    <Check className="w-3 h-3" />
+                    Ready
+                  </span>
+                )}
+              </div>
+              <div className="bg-bambu-dark rounded-lg p-3 space-y-2 text-xs">
+                {filamentComparison.map((item) => (
+                  <div
+                    key={item.slot_id}
+                    className="grid items-center gap-2"
+                    style={{ gridTemplateColumns: '48px 16px 1fr auto 16px 56px 16px' }}
+                  >
+                    {/* Slot label */}
+                    <span className="text-bambu-gray">Slot {item.slot_id}</span>
+                    {/* Required color */}
+                    <Circle
+                      className="w-3 h-3 flex-shrink-0"
+                      fill={item.color}
+                      stroke={item.color}
+                    />
+                    {/* Required type + grams */}
+                    <span className="text-white truncate">
+                      {item.type} <span className="text-bambu-gray">({item.used_grams}g)</span>
+                    </span>
+                    {/* Arrow */}
+                    <span className="text-bambu-gray">→</span>
+                    {/* Loaded color */}
+                    {item.loaded ? (
+                      <Circle
+                        className="w-3 h-3 flex-shrink-0"
+                        fill={item.loaded.color}
+                        stroke={item.loaded.color}
+                      />
+                    ) : (
+                      <span />
+                    )}
+                    {/* Loaded type */}
+                    <span className={
+                      item.status === 'match' ? 'text-bambu-green' :
+                      item.status === 'type_only' ? 'text-yellow-400' :
+                      'text-orange-400'
+                    }>
+                      {item.loaded?.type || 'Empty'}
+                    </span>
+                    {/* Status icon */}
+                    {item.status === 'match' ? (
+                      <Check className="w-3 h-3 text-bambu-green" />
+                    ) : item.status === 'type_only' ? (
+                      <span title="Color mismatch">
+                        <AlertTriangle className="w-3 h-3 text-yellow-400" />
+                      </span>
+                    ) : (
+                      <AlertTriangle className="w-3 h-3 text-orange-400" />
+                    )}
+                  </div>
+                ))}
+              </div>
+              {(hasAnyMismatch || hasEmptySlots) && (
+                <p className="text-xs text-orange-400 mt-2">
+                  The printer may load different filaments than expected.
+                </p>
+              )}
             </div>
           )}
 

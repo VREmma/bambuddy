@@ -3,25 +3,27 @@
 import logging
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Body, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.database import get_db
-from backend.app.models.smart_plug import SmartPlug
 from backend.app.models.printer import Printer
+from backend.app.models.smart_plug import SmartPlug
 from backend.app.schemas.smart_plug import (
-    SmartPlugCreate,
-    SmartPlugUpdate,
-    SmartPlugResponse,
     SmartPlugControl,
+    SmartPlugCreate,
+    SmartPlugEnergy,
+    SmartPlugResponse,
     SmartPlugStatus,
     SmartPlugTestConnection,
-    SmartPlugEnergy,
+    SmartPlugUpdate,
 )
-from backend.app.services.tasmota import tasmota_service
-from backend.app.services.printer_manager import printer_manager
+from backend.app.services.discovery import tasmota_scanner
 from backend.app.services.notification_service import notification_service
+from backend.app.services.printer_manager import printer_manager
+from backend.app.services.tasmota import tasmota_service
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +45,12 @@ async def create_smart_plug(
     """Create a new smart plug."""
     # Validate printer_id if provided
     if data.printer_id:
-        result = await db.execute(
-            select(Printer).where(Printer.id == data.printer_id)
-        )
+        result = await db.execute(select(Printer).where(Printer.id == data.printer_id))
         if not result.scalar_one_or_none():
             raise HTTPException(400, "Printer not found")
 
         # Check if printer already has a plug assigned
-        result = await db.execute(
-            select(SmartPlug).where(SmartPlug.printer_id == data.printer_id)
-        )
+        result = await db.execute(select(SmartPlug).where(SmartPlug.printer_id == data.printer_id))
         if result.scalar_one_or_none():
             raise HTTPException(400, "This printer already has a smart plug assigned")
 
@@ -68,13 +66,129 @@ async def create_smart_plug(
 @router.get("/by-printer/{printer_id}", response_model=SmartPlugResponse | None)
 async def get_smart_plug_by_printer(printer_id: int, db: AsyncSession = Depends(get_db)):
     """Get the smart plug assigned to a printer."""
-    result = await db.execute(
-        select(SmartPlug).where(SmartPlug.printer_id == printer_id)
-    )
+    result = await db.execute(select(SmartPlug).where(SmartPlug.printer_id == printer_id))
     plug = result.scalar_one_or_none()
     if not plug:
         return None
     return plug
+
+
+# Tasmota Discovery Endpoints
+# NOTE: These must be defined BEFORE /{plug_id} routes to avoid path conflicts
+
+
+class TasmotaScanRequest(BaseModel):
+    """Request to scan for Tasmota devices."""
+
+    from_ip: str | None = None  # Starting IP (auto-detected if not provided)
+    to_ip: str | None = None  # Ending IP (auto-detected if not provided)
+    timeout: float = 1.0  # Connection timeout per host
+
+
+def get_local_network_range() -> tuple[str, str]:
+    """Auto-detect local network and return IP range to scan."""
+    import socket
+
+    try:
+        # Get local IP by connecting to a public DNS (doesn't actually send data)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+
+        # Parse IP and create range (assume /24 subnet)
+        parts = local_ip.split(".")
+        base = ".".join(parts[:3])
+        from_ip = f"{base}.1"
+        to_ip = f"{base}.254"
+
+        logger.info(f"Auto-detected network: {from_ip} - {to_ip} (local IP: {local_ip})")
+        return from_ip, to_ip
+
+    except Exception as e:
+        logger.error(f"Failed to detect local network: {e}")
+        # Fallback to common home network
+        return "192.168.1.1", "192.168.1.254"
+
+
+class TasmotaScanStatus(BaseModel):
+    """Tasmota scan status response."""
+
+    running: bool
+    scanned: int
+    total: int
+
+
+class DiscoveredTasmotaDevice(BaseModel):
+    """Discovered Tasmota device."""
+
+    ip_address: str
+    name: str
+    module: int | None = None
+    state: str | None = None
+    discovered_at: str | None = None
+
+
+@router.post("/discover/scan", response_model=TasmotaScanStatus)
+async def start_tasmota_scan(request: TasmotaScanRequest | None = Body(default=None)):
+    """Start an IP range scan for Tasmota devices.
+
+    Auto-detects local network if no IP range provided.
+    """
+    import asyncio
+
+    # Auto-detect network
+    from_ip, to_ip = get_local_network_range()
+    timeout = request.timeout if request else 1.0
+
+    # Start scan in background
+    asyncio.create_task(tasmota_scanner.scan_range(from_ip, to_ip, timeout))
+
+    # Return immediate status
+    scanned, total = tasmota_scanner.progress
+    return TasmotaScanStatus(
+        running=tasmota_scanner.is_running,
+        scanned=scanned,
+        total=total,
+    )
+
+
+@router.get("/discover/status", response_model=TasmotaScanStatus)
+async def get_tasmota_scan_status():
+    """Get the current Tasmota scan status."""
+    scanned, total = tasmota_scanner.progress
+    return TasmotaScanStatus(
+        running=tasmota_scanner.is_running,
+        scanned=scanned,
+        total=total,
+    )
+
+
+@router.post("/discover/stop", response_model=TasmotaScanStatus)
+async def stop_tasmota_scan():
+    """Stop the current Tasmota scan."""
+    tasmota_scanner.stop()
+    scanned, total = tasmota_scanner.progress
+    return TasmotaScanStatus(
+        running=tasmota_scanner.is_running,
+        scanned=scanned,
+        total=total,
+    )
+
+
+@router.get("/discover/devices", response_model=list[DiscoveredTasmotaDevice])
+async def get_discovered_tasmota_devices():
+    """Get list of discovered Tasmota devices."""
+    return [
+        DiscoveredTasmotaDevice(
+            ip_address=d["ip_address"],
+            name=d["name"],
+            module=d.get("module"),
+            state=d.get("state"),
+            discovered_at=d.get("discovered_at"),
+        )
+        for d in tasmota_scanner.discovered_devices
+    ]
 
 
 @router.get("/{plug_id}", response_model=SmartPlugResponse)
@@ -106,9 +220,7 @@ async def update_smart_plug(
         new_printer_id = update_data["printer_id"]
 
         # Check printer exists
-        result = await db.execute(
-            select(Printer).where(Printer.id == new_printer_id)
-        )
+        result = await db.execute(select(Printer).where(Printer.id == new_printer_id))
         if not result.scalar_one_or_none():
             raise HTTPException(400, "Printer not found")
 

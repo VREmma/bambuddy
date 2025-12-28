@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -23,6 +24,8 @@ class SmartPlugBase(BaseModel):
     schedule_enabled: bool = False
     schedule_on_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")  # HH:MM format
     schedule_off_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")  # HH:MM format
+    # Switchbar visibility
+    show_in_switchbar: bool = False
 
 
 class SmartPlugCreate(SmartPlugBase):
@@ -49,6 +52,8 @@ class SmartPlugUpdate(BaseModel):
     schedule_enabled: bool | None = None
     schedule_on_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     schedule_off_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    # Switchbar visibility
+    show_in_switchbar: bool | None = None
 
 
 class SmartPlugResponse(SmartPlugBase):
@@ -70,6 +75,7 @@ class SmartPlugControl(BaseModel):
 
 class SmartPlugEnergy(BaseModel):
     """Energy monitoring data from a smart plug."""
+
     power: float | None = None  # Current watts
     voltage: float | None = None  # Volts
     current: float | None = None  # Amps

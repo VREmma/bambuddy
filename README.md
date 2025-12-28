@@ -48,7 +48,8 @@
 - 3D model preview (Three.js)
 - Duplicate detection & full-text search
 - Photo attachments & failure analysis
-- Re-print to any connected printer
+- Timelapse editor (trim, speed, music)
+- Re-print to any connected printer with AMS filament preview
 - Archive comparison (side-by-side diff)
 
 ### 📊 Monitoring & Stats
@@ -96,14 +97,6 @@
 - Interval reminders (hours/days)
 - Print time accuracy stats
 - File manager for printer storage
-
-### 🎛️ Printer Control
-- AMS/AMS-HT temperature & humidity monitoring
-- Chamber temperature & light control
-- Speed profiles & fan controls
-- AI detection modules (spaghetti, first layer)
-- Automated calibration (bed level, vibration)
-- Dual nozzle support
 
 </td>
 </tr>
@@ -288,7 +281,7 @@ server {
 
 > **Note:** WebSocket support is required for real-time printer updates.
 
-**Network Mode Host** (for easier printer discovery):
+**Network Mode Host** (required for printer discovery and camera streaming):
 
 ```yaml
 services:
@@ -296,6 +289,8 @@ services:
     build: .
     network_mode: host
 ```
+
+> **Note:** Docker's default bridge networking cannot receive SSDP multicast packets for automatic printer discovery. When using `network_mode: host`, Bambuddy can discover printers via subnet scanning - enter your network range (e.g., `192.168.1.0/24`) in the Add Printer dialog.
 
 </details>
 

@@ -2,6 +2,35 @@
 
 All notable changes to Bambuddy will be documented in this file.
 
+## [0.1.6b] - 2025-12-28
+
+### Added
+- **Tasmota device discovery** - Automatically discover Tasmota smart plugs on your network. Click "Discover Tasmota Devices" in the Add Smart Plug modal to scan your local subnet. Supports devices with and without authentication.
+- **Switchbar for quick smart plug access** - New sidebar widget for controlling smart plugs without leaving the current page. Enable "Show in Switchbar" for any plug to add it to the quick access panel. Shows real-time status, power consumption, and on/off controls.
+- **Timelapse editor** - Edit timelapse videos with trim, speed adjustment (0.25x-4x), and music overlay. Uses FFmpeg for server-side processing with browser-based preview.
+- **AMS filament preview** - Reprint modal shows filament comparison between what the print requires and what's currently loaded in the AMS. Compares both type and color with visual indicators (green=match, yellow=color mismatch, orange=type mismatch).
+- **File type badge** - Archive cards now show GCODE (green) or SOURCE (orange) badge to indicate whether the file is a sliced print-ready file or source-only.
+- **Docker printer discovery** - Subnet scanning for discovering printers when running in Docker with `network_mode: host`. Automatically detects Docker environment and shows subnet input field in Add Printer dialog.
+- **Printer model mapping** - Discovery now shows friendly model names (X1C, H2D, P1S) instead of raw SSDP codes (BL-P001, O1D, C11).
+- **Discovery API tests** - Comprehensive test coverage for discovery endpoints.
+- **Project filament colors** - Project cards now display filament color swatches from assigned archives.
+- **BOM filter** - Hide completed BOM items with "Hide done" toggle on project detail page.
+- **Projects in backup/restore** - Projects, BOM items, and attachments now included in database backup/restore.
+- **Attachment file validation** - File type validation for project attachments (images, documents, 3D files, archives, scripts, configs).
+
+### Changed
+- **Timelapse viewer** - Default playback speed changed from 2x to 1x.
+- **GitHub issue template** - Added mandatory printer firmware version field and LAN-only mode checkbox for better bug reports.
+- **Docker compose** - Clearer comments explaining `network_mode: host` requirement for printer discovery and camera streaming.
+- **Project card design** - Enhanced visual polish with gradients, shadows, and glow effects on hover.
+- **Project page layout** - Improved spacing and padding on project list and detail pages.
+- **Delete confirmations** - Replaced browser confirm dialogs with styled confirmation modals.
+
+### Fixed
+- **Notification module** - Fixed bug where notifications were sent even when printer was offline.
+- **Attachment uploads** - Fixed file attachments not persisting due to SQLAlchemy JSON column mutation detection.
+- **Camera stream stability** - Fixed stream stopping after a few minutes by increasing ffmpeg read timeout (10s→30s), adding buffer options, and implementing auto-reconnection with exponential backoff in the frontend.
+
 ## [0.1.5] - 2025-12-19
 
 ### Fixed

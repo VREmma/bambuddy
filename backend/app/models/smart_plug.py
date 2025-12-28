@@ -1,5 +1,6 @@
 from datetime import datetime
-from sqlalchemy import String, Boolean, Integer, Float, DateTime, ForeignKey, func
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -44,18 +45,21 @@ class SmartPlug(Base):
     schedule_on_time: Mapped[str | None] = mapped_column(String(5), nullable=True)  # "HH:MM" format
     schedule_off_time: Mapped[str | None] = mapped_column(String(5), nullable=True)  # "HH:MM" format
 
+    # Switchbar visibility
+    show_in_switchbar: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Status tracking
     last_state: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "ON"/"OFF"
     last_checked: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     auto_off_executed: Mapped[bool] = mapped_column(Boolean, default=False)  # True when auto-off was triggered
     auto_off_pending: Mapped[bool] = mapped_column(Boolean, default=False)  # True when waiting for cooldown
-    auto_off_pending_since: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # When auto-off was scheduled
+    auto_off_pending_since: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )  # When auto-off was scheduled
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # Relationship
     printer: Mapped["Printer"] = relationship(back_populates="smart_plug")

@@ -2,8 +2,15 @@ services:
   bambuddy:
     build: .
     container_name: bambuddy
-    ports:
-      - "8000:8000"
+    # Network mode options:
+    # - Default (bridge): Works for basic usage, but printer discovery and
+    #   camera streaming may not work since container can't reach LAN directly.
+    # - Host mode: Required for printer discovery scanning and camera streaming.
+    #   Uncomment "network_mode: host" and remove "ports:" section below.
+    #
+    network_mode: host
+    #ports:
+    #  - "8000:8000"
     volumes:
       - bambuddy_data:/app/data
       - bambuddy_logs:/app/logs

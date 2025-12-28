@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Printer, Archive, Calendar, BarChart3, Cloud, Settings, Sun, Moon, ChevronLeft, ChevronRight, Keyboard, Github, GripVertical, ArrowUpCircle, Wrench, FolderKanban, X, Menu, Info, type LucideIcon } from 'lucide-react';
+import { Printer, Archive, Calendar, BarChart3, Cloud, Settings, Sun, Moon, ChevronLeft, ChevronRight, Keyboard, Github, GripVertical, ArrowUpCircle, Wrench, FolderKanban, X, Menu, Info, Plug, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
+import { SwitchbarPopover } from './SwitchbarPopover';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { getIconByName } from './IconPicker';
@@ -72,6 +73,7 @@ export function Layout() {
   });
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showSwitchbar, setShowSwitchbar] = useState(false);
   const [sidebarOrder, setSidebarOrder] = useState<string[]>(getSidebarOrder);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -106,6 +108,15 @@ export function Layout() {
     queryKey: ['external-links'],
     queryFn: api.getExternalLinks,
   });
+
+  // Fetch smart plugs to check for switchbar items
+  const { data: smartPlugs } = useQuery({
+    queryKey: ['smart-plugs'],
+    queryFn: api.getSmartPlugs,
+    staleTime: 30 * 1000, // 30 seconds
+  });
+
+  const hasSwitchbarPlugs = smartPlugs?.some(p => p.show_in_switchbar) ?? false;
 
   // Build the unified sidebar items list
   const navItemsMap = new Map(defaultNavItems.map(item => [item.id, item]));
@@ -457,6 +468,22 @@ export function Layout() {
                 )}
               </div>
               <div className="flex items-center gap-1">
+                {hasSwitchbarPlugs && (
+                  <div className="relative">
+                    <button
+                      onMouseEnter={() => setShowSwitchbar(true)}
+                      className={`p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors ${
+                        showSwitchbar ? 'text-bambu-green' : 'text-bambu-gray-light hover:text-white'
+                      }`}
+                      title={t('nav.smartSwitches', { defaultValue: 'Smart Switches' })}
+                    >
+                      <Plug className="w-5 h-5" />
+                    </button>
+                    {showSwitchbar && (
+                      <SwitchbarPopover onClose={() => setShowSwitchbar(false)} />
+                    )}
+                  </div>
+                )}
                 <NavLink
                   to="/system"
                   className={({ isActive }) =>
@@ -503,6 +530,22 @@ export function Layout() {
                 >
                   <ArrowUpCircle className="w-5 h-5" />
                 </button>
+              )}
+              {hasSwitchbarPlugs && (
+                <div className="relative">
+                  <button
+                    onMouseEnter={() => setShowSwitchbar(true)}
+                    className={`p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors ${
+                      showSwitchbar ? 'text-bambu-green' : 'text-bambu-gray-light hover:text-white'
+                    }`}
+                    title={t('nav.smartSwitches', { defaultValue: 'Smart Switches' })}
+                  >
+                    <Plug className="w-5 h-5" />
+                  </button>
+                  {showSwitchbar && (
+                    <SwitchbarPopover onClose={() => setShowSwitchbar(false)} />
+                  )}
+                </div>
               )}
               <NavLink
                 to="/system"
