@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, X, Settings, Bell, FileText, Plug, Printer, Palette, Wrench, Archive, Loader2, Key, AlertTriangle, Link, FolderKanban } from 'lucide-react';
+import { Download, X, Settings, Bell, FileText, Plug, Printer, Palette, Wrench, Archive, Loader2, Key, AlertTriangle, Link, FolderKanban, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
@@ -94,6 +94,14 @@ const BACKUP_CATEGORIES: BackupCategory[] = [
     icon: <FolderKanban className="w-4 h-4" />,
     default: false,
     description: 'Projects, BOM items, and attachments',
+  },
+  {
+    id: 'pending_uploads',
+    labelKey: 'backup.categories.pendingUploads',
+    defaultLabel: 'Pending Uploads',
+    icon: <Upload className="w-4 h-4" />,
+    default: false,
+    description: 'Virtual printer uploads awaiting review',
   },
 ];
 

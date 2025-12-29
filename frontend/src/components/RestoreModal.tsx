@@ -31,6 +31,9 @@ const CATEGORY_LABELS: Record<string, string> = {
   filaments: 'Filaments',
   maintenance_types: 'Maintenance Types',
   archives: 'Archives',
+  projects: 'Projects',
+  pending_uploads: 'Pending Uploads',
+  external_links: 'External Links',
 };
 
 export function RestoreModal({ onClose, onRestore, onSuccess }: RestoreModalProps) {
@@ -194,6 +197,7 @@ export function RestoreModal({ onClose, onRestore, onSuccess }: RestoreModalProp
                         <li><strong>Notification Providers</strong> - matched by name</li>
                         <li><strong>Filaments</strong> - matched by name + type + brand</li>
                         <li><strong>Archives</strong> - matched by content hash (always skipped)</li>
+                        <li><strong>Pending Uploads</strong> - matched by filename</li>
                         <li><strong>Settings & Templates</strong> - always overwritten</li>
                       </ul>
                     </div>

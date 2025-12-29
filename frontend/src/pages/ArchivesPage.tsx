@@ -60,6 +60,7 @@ import { ProjectPageModal } from '../components/ProjectPageModal';
 import { TimelapseViewer } from '../components/TimelapseViewer';
 import { AddToQueueModal } from '../components/AddToQueueModal';
 import { CompareArchivesModal } from '../components/CompareArchivesModal';
+import { PendingUploadsPanel } from '../components/PendingUploadsPanel';
 import { useToast } from '../contexts/ToastContext';
 
 function formatFileSize(bytes: number): string {
@@ -1721,6 +1722,9 @@ export function ArchivesPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Pending Uploads Panel (visible when in queue mode with pending files) */}
+      <PendingUploadsPanel />
 
       {/* Archives */}
       {isLoading ? (

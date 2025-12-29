@@ -6,16 +6,23 @@ class AppSettings(BaseModel):
 
     auto_archive: bool = Field(default=True, description="Automatically archive prints when completed")
     save_thumbnails: bool = Field(default=True, description="Extract and save preview images from 3MF files")
-    capture_finish_photo: bool = Field(default=True, description="Capture photo from printer camera when print completes")
+    capture_finish_photo: bool = Field(
+        default=True, description="Capture photo from printer camera when print completes"
+    )
     default_filament_cost: float = Field(default=25.0, description="Default filament cost per kg")
     currency: str = Field(default="USD", description="Currency for cost tracking")
     energy_cost_per_kwh: float = Field(default=0.15, description="Electricity cost per kWh for energy tracking")
-    energy_tracking_mode: str = Field(default="total", description="Energy display mode on stats: 'print' shows sum of per-print energy, 'total' shows lifetime plug consumption")
+    energy_tracking_mode: str = Field(
+        default="total",
+        description="Energy display mode on stats: 'print' shows sum of per-print energy, 'total' shows lifetime plug consumption",
+    )
 
     # Spoolman integration
     spoolman_enabled: bool = Field(default=False, description="Enable Spoolman integration for filament tracking")
     spoolman_url: str = Field(default="", description="Spoolman server URL (e.g., http://localhost:7912)")
-    spoolman_sync_mode: str = Field(default="auto", description="Sync mode: 'auto' syncs immediately, 'manual' requires button press")
+    spoolman_sync_mode: str = Field(
+        default="auto", description="Sync mode: 'auto' syncs immediately, 'manual' requires button press"
+    )
 
     # Updates
     check_updates: bool = Field(default=True, description="Automatically check for updates on startup")
@@ -25,9 +32,13 @@ class AppSettings(BaseModel):
 
     # AMS threshold settings for humidity and temperature coloring
     ams_humidity_good: int = Field(default=40, description="Humidity threshold for good (green): <= this value")
-    ams_humidity_fair: int = Field(default=60, description="Humidity threshold for fair (orange): <= this value, > is red")
+    ams_humidity_fair: int = Field(
+        default=60, description="Humidity threshold for fair (orange): <= this value, > is red"
+    )
     ams_temp_good: float = Field(default=28.0, description="Temperature threshold for good (blue): <= this value")
-    ams_temp_fair: float = Field(default=35.0, description="Temperature threshold for fair (orange): <= this value, > is red")
+    ams_temp_fair: float = Field(
+        default=35.0, description="Temperature threshold for fair (orange): <= this value, > is red"
+    )
     ams_history_retention_days: int = Field(default=30, description="Number of days to keep AMS sensor history data")
 
     # Date/time display format
@@ -39,6 +50,11 @@ class AppSettings(BaseModel):
 
     # Telemetry
     telemetry_enabled: bool = Field(default=True, description="Send anonymous usage data to help improve BamBuddy")
+
+    # Virtual Printer
+    virtual_printer_enabled: bool = Field(default=False, description="Enable virtual printer for slicer uploads")
+    virtual_printer_access_code: str = Field(default="", description="Access code for virtual printer authentication")
+    virtual_printer_mode: str = Field(default="immediate", description="Archive mode: 'immediate' or 'queue'")
 
 
 class AppSettingsUpdate(BaseModel):
@@ -65,3 +81,6 @@ class AppSettingsUpdate(BaseModel):
     time_format: str | None = None
     default_printer_id: int | None = None
     telemetry_enabled: bool | None = None
+    virtual_printer_enabled: bool | None = None
+    virtual_printer_access_code: str | None = None
+    virtual_printer_mode: str | None = None

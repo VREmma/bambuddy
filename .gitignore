@@ -31,6 +31,9 @@ npm-debug.log*
 # Archive files (user data)
 archive/
 
+# Virtual printer (auto-generated certs and uploads)
+virtual_printer/
+
 # IDE
 .idea/
 .vscode/

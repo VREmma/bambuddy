@@ -17,6 +17,7 @@ from backend.app.models.filament import Filament
 from backend.app.models.maintenance import MaintenanceType
 from backend.app.models.notification import NotificationProvider
 from backend.app.models.notification_template import NotificationTemplate
+from backend.app.models.pending_upload import PendingUpload
 from backend.app.models.printer import Printer
 from backend.app.models.project import Project
 from backend.app.models.project_bom import ProjectBOMItem
@@ -70,6 +71,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
                 "spoolman_enabled",
                 "check_updates",
                 "telemetry_enabled",
+                "virtual_printer_enabled",
             ]:
                 settings_dict[setting.key] = setting.value.lower() == "true"
             elif setting.key in ["default_filament_cost", "energy_cost_per_kwh", "ams_temp_good", "ams_temp_fair"]:
@@ -181,6 +183,7 @@ async def export_backup(
     include_maintenance: bool = Query(False, description="Include maintenance types and records"),
     include_archives: bool = Query(False, description="Include print archive metadata"),
     include_projects: bool = Query(False, description="Include projects with BOM items"),
+    include_pending_uploads: bool = Query(False, description="Include pending virtual printer uploads"),
     include_access_codes: bool = Query(False, description="Include printer access codes (security risk!)"),
 ):
     """Export selected data as JSON backup."""
@@ -510,6 +513,36 @@ async def export_backup(
             backup["projects"].append(project_data)
         backup["included"].append("projects")
 
+    # Pending uploads (virtual printer queue mode)
+    if include_pending_uploads:
+        result = await db.execute(select(PendingUpload).where(PendingUpload.status == "pending"))
+        pending_uploads = result.scalars().all()
+        backup["pending_uploads"] = []
+
+        for p in pending_uploads:
+            upload_data = {
+                "filename": p.filename,
+                "file_size": p.file_size,
+                "source_ip": p.source_ip,
+                "status": p.status,
+                "tags": p.tags,
+                "notes": p.notes,
+                "project_id": p.project_id,
+                "uploaded_at": p.uploaded_at.isoformat() if p.uploaded_at else None,
+            }
+
+            # Include the actual file if it exists
+            if p.file_path:
+                file_path = Path(p.file_path)
+                if file_path.exists():
+                    # Store relative path for ZIP
+                    rel_path = f"pending_uploads/{p.filename}"
+                    upload_data["file_path"] = rel_path
+                    backup_files.append((rel_path, file_path))
+
+            backup["pending_uploads"].append(upload_data)
+        backup["included"].append("pending_uploads")
+
     # If there are files to include (icons or archives), create ZIP file
     if backup_files:
         zip_buffer = io.BytesIO()
@@ -599,6 +632,7 @@ async def import_backup(
         "filaments": 0,
         "maintenance_types": 0,
         "projects": 0,
+        "pending_uploads": 0,
     }
     skipped = {
         "settings": 0,
@@ -611,6 +645,7 @@ async def import_backup(
         "maintenance_types": 0,
         "archives": 0,
         "projects": 0,
+        "pending_uploads": 0,
     }
     skipped_details = {
         "notification_providers": [],
@@ -621,6 +656,7 @@ async def import_backup(
         "maintenance_types": [],
         "archives": [],
         "projects": [],
+        "pending_uploads": [],
     }
 
     # Restore settings (always overwrites)
@@ -1077,6 +1113,82 @@ async def import_backup(
                     if archive:
                         archive.project_id = project_name_to_id[project_name]
 
+    # Restore pending uploads (skip duplicates by filename)
+    if "pending_uploads" in backup:
+        # Ensure the pending uploads directory exists
+        pending_uploads_dir = base_dir / "virtual_printer" / "uploads"
+        pending_uploads_dir.mkdir(parents=True, exist_ok=True)
+
+        for upload_data in backup["pending_uploads"]:
+            # Check for existing by filename
+            result = await db.execute(
+                select(PendingUpload).where(
+                    PendingUpload.filename == upload_data["filename"],
+                    PendingUpload.status == "pending",
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                if overwrite:
+                    # Update existing
+                    existing.file_size = upload_data.get("file_size", 0)
+                    existing.source_ip = upload_data.get("source_ip")
+                    existing.tags = upload_data.get("tags")
+                    existing.notes = upload_data.get("notes")
+                    existing.project_id = upload_data.get("project_id")
+                    # Update file path if file was restored from ZIP
+                    if upload_data.get("file_path"):
+                        restored_file = base_dir / upload_data["file_path"]
+                        if restored_file.exists():
+                            # Move to proper location
+                            target_path = pending_uploads_dir / upload_data["filename"]
+                            if restored_file != target_path:
+                                import shutil
+
+                                shutil.move(str(restored_file), str(target_path))
+                            existing.file_path = str(target_path)
+                    restored["pending_uploads"] += 1
+                else:
+                    skipped["pending_uploads"] += 1
+                    skipped_details["pending_uploads"].append(upload_data["filename"])
+            else:
+                # Determine file path
+                file_path_str = None
+                if upload_data.get("file_path"):
+                    restored_file = base_dir / upload_data["file_path"]
+                    if restored_file.exists():
+                        # Move to proper location
+                        target_path = pending_uploads_dir / upload_data["filename"]
+                        if restored_file != target_path:
+                            import shutil
+
+                            shutil.move(str(restored_file), str(target_path))
+                        file_path_str = str(target_path)
+
+                # Parse uploaded_at
+                uploaded_at = None
+                if upload_data.get("uploaded_at"):
+                    try:
+                        uploaded_at = datetime.fromisoformat(upload_data["uploaded_at"].replace("Z", "+00:00"))
+                    except (ValueError, AttributeError):
+                        uploaded_at = datetime.utcnow()
+                else:
+                    uploaded_at = datetime.utcnow()
+
+                pending = PendingUpload(
+                    filename=upload_data["filename"],
+                    file_path=file_path_str or "",
+                    file_size=upload_data.get("file_size", 0),
+                    source_ip=upload_data.get("source_ip"),
+                    status="pending",
+                    tags=upload_data.get("tags"),
+                    notes=upload_data.get("notes"),
+                    project_id=upload_data.get("project_id"),
+                    uploaded_at=uploaded_at,
+                )
+                db.add(pending)
+                restored["pending_uploads"] += 1
+
     await db.commit()
 
     # If printers were in the backup (restored, updated, or skipped), reconnect all active printers
@@ -1103,6 +1215,33 @@ async def import_backup(
                     pass  # Connected successfully
             except Exception:
                 pass  # Spoolman connection failed, but don't fail the restore
+
+        # Reconfigure virtual printer if settings were restored
+        try:
+            from backend.app.services.virtual_printer import virtual_printer_manager
+
+            vp_enabled = await get_setting(db, "virtual_printer_enabled")
+            vp_access_code = await get_setting(db, "virtual_printer_access_code")
+            vp_mode = await get_setting(db, "virtual_printer_mode")
+
+            enabled = vp_enabled and vp_enabled.lower() == "true"
+            access_code = vp_access_code or ""
+            mode = vp_mode or "immediate"
+
+            if enabled and access_code:
+                await virtual_printer_manager.configure(
+                    enabled=True,
+                    access_code=access_code,
+                    mode=mode,
+                )
+            elif not enabled and virtual_printer_manager.is_enabled:
+                await virtual_printer_manager.configure(
+                    enabled=False,
+                    access_code=access_code,
+                    mode=mode,
+                )
+        except Exception:
+            pass  # Virtual printer config failed, but don't fail the restore
 
     # Build summary message
     restored_parts = []
@@ -1134,3 +1273,94 @@ async def import_backup(
         "files_restored": files_restored,
         "total_skipped": total_skipped,
     }
+
+
+# =============================================================================
+# Virtual Printer Settings
+# =============================================================================
+
+
+@router.get("/virtual-printer")
+async def get_virtual_printer_settings(db: AsyncSession = Depends(get_db)):
+    """Get virtual printer settings and status."""
+    from backend.app.services.virtual_printer import virtual_printer_manager
+
+    enabled = await get_setting(db, "virtual_printer_enabled")
+    access_code = await get_setting(db, "virtual_printer_access_code")
+    mode = await get_setting(db, "virtual_printer_mode")
+
+    return {
+        "enabled": enabled == "true" if enabled else False,
+        "access_code_set": bool(access_code),
+        "mode": mode or "immediate",
+        "status": virtual_printer_manager.get_status(),
+    }
+
+
+@router.put("/virtual-printer")
+async def update_virtual_printer_settings(
+    enabled: bool = None,
+    access_code: str = None,
+    mode: str = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update virtual printer settings and restart services if needed."""
+    from backend.app.services.virtual_printer import virtual_printer_manager
+
+    # Get current values
+    current_enabled = await get_setting(db, "virtual_printer_enabled") == "true"
+    current_access_code = await get_setting(db, "virtual_printer_access_code") or ""
+    current_mode = await get_setting(db, "virtual_printer_mode") or "immediate"
+
+    # Apply updates
+    new_enabled = enabled if enabled is not None else current_enabled
+    new_access_code = access_code if access_code is not None else current_access_code
+    new_mode = mode if mode is not None else current_mode
+
+    # Validate mode
+    if new_mode not in ("immediate", "queue"):
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Mode must be 'immediate' or 'queue'"},
+        )
+
+    # Validate access code when enabling
+    if new_enabled and not new_access_code:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Access code is required when enabling virtual printer"},
+        )
+
+    # Validate access code length (Bambu Studio requires exactly 8 characters)
+    if access_code is not None and len(access_code) != 8:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Access code must be exactly 8 characters"},
+        )
+
+    # Save settings
+    await set_setting(db, "virtual_printer_enabled", "true" if new_enabled else "false")
+    if access_code is not None:
+        await set_setting(db, "virtual_printer_access_code", access_code)
+    await set_setting(db, "virtual_printer_mode", new_mode)
+    await db.commit()
+
+    # Reconfigure virtual printer
+    try:
+        await virtual_printer_manager.configure(
+            enabled=new_enabled,
+            access_code=new_access_code,
+            mode=new_mode,
+        )
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": str(e)},
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Failed to configure virtual printer: {e}"},
+        )
+
+    return await get_virtual_printer_settings(db)

@@ -14,6 +14,7 @@ services:
     volumes:
       - bambuddy_data:/app/data
       - bambuddy_logs:/app/logs
+      - bambuddy_vprinter:/app/virtual_printer
     environment:
       - TZ=Europe/Berlin
     restart: unless-stopped
@@ -21,3 +22,4 @@ services:
 volumes:
   bambuddy_data:
   bambuddy_logs:
+  bambuddy_vprinter:

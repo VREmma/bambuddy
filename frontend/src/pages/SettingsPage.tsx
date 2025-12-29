@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Upload, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, Info, X, Shield } from 'lucide-react';
+import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Upload, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, Info, X, Shield, Printer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
-import type { AppSettings, SmartPlug, SmartPlugStatus, NotificationProvider, NotificationTemplate, UpdateStatus } from '../api/client';
+import type { AppSettings, AppSettingsUpdate, SmartPlug, SmartPlugStatus, NotificationProvider, NotificationTemplate, UpdateStatus } from '../api/client';
 import { Card, CardContent, CardHeader } from '../components/Card';
 import { Button } from '../components/Button';
 import { SmartPlugCard } from '../components/SmartPlugCard';
@@ -16,6 +16,8 @@ import { BackupModal } from '../components/BackupModal';
 import { RestoreModal } from '../components/RestoreModal';
 import { SpoolmanSettings } from '../components/SpoolmanSettings';
 import { ExternalLinksSettings } from '../components/ExternalLinksSettings';
+import { VirtualPrinterSettings } from '../components/VirtualPrinterSettings';
+import { virtualPrinterApi } from '../api/client';
 import { defaultNavItems, getDefaultView, setDefaultView } from '../components/Layout';
 import { availableLanguages } from '../i18n';
 import { useToast } from '../contexts/ToastContext';
@@ -33,7 +35,7 @@ export function SettingsPage() {
   const [editingTemplate, setEditingTemplate] = useState<NotificationTemplate | null>(null);
   const [showLogViewer, setShowLogViewer] = useState(false);
   const [defaultView, setDefaultViewState] = useState<string>(getDefaultView());
-  const [activeTab, setActiveTab] = useState<'general' | 'plugs' | 'notifications' | 'apikeys'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'plugs' | 'notifications' | 'apikeys' | 'virtual-printer'>('general');
   const [showCreateAPIKey, setShowCreateAPIKey] = useState(false);
   const [newAPIKeyName, setNewAPIKeyName] = useState('');
   const [newAPIKeyPermissions, setNewAPIKeyPermissions] = useState({
@@ -164,6 +166,14 @@ export function SettingsPage() {
     queryKey: ['notification-templates'],
     queryFn: api.getNotificationTemplates,
   });
+
+  // Virtual printer status for tab indicator
+  const { data: virtualPrinterSettings } = useQuery({
+    queryKey: ['virtual-printer-settings'],
+    queryFn: virtualPrinterApi.getSettings,
+    refetchInterval: 10000,
+  });
+  const virtualPrinterRunning = virtualPrinterSettings?.status?.running ?? false;
 
   const { data: ffmpegStatus } = useQuery({
     queryKey: ['ffmpeg-status'],
@@ -332,7 +342,28 @@ export function SettingsPage() {
 
     // Set new debounced save (500ms delay)
     saveTimeoutRef.current = setTimeout(() => {
-      updateMutation.mutate(localSettings);
+      // Only send the fields we manage on this page (exclude virtual_printer_* which are managed separately)
+      const settingsToSave: AppSettingsUpdate = {
+        auto_archive: localSettings.auto_archive,
+        save_thumbnails: localSettings.save_thumbnails,
+        capture_finish_photo: localSettings.capture_finish_photo,
+        default_filament_cost: localSettings.default_filament_cost,
+        currency: localSettings.currency,
+        energy_cost_per_kwh: localSettings.energy_cost_per_kwh,
+        energy_tracking_mode: localSettings.energy_tracking_mode,
+        check_updates: localSettings.check_updates,
+        notification_language: localSettings.notification_language,
+        telemetry_enabled: localSettings.telemetry_enabled,
+        ams_humidity_good: localSettings.ams_humidity_good,
+        ams_humidity_fair: localSettings.ams_humidity_fair,
+        ams_temp_good: localSettings.ams_temp_good,
+        ams_temp_fair: localSettings.ams_temp_fair,
+        ams_history_retention_days: localSettings.ams_history_retention_days,
+        date_format: localSettings.date_format,
+        time_format: localSettings.time_format,
+        default_printer_id: localSettings.default_printer_id,
+      };
+      updateMutation.mutate(settingsToSave);
     }, 500);
 
     // Cleanup on unmount or when localSettings changes again
@@ -421,6 +452,18 @@ export function SettingsPage() {
               {apiKeys.length}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => setActiveTab('virtual-printer')}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-2 ${
+            activeTab === 'virtual-printer'
+              ? 'text-bambu-green border-bambu-green'
+              : 'text-bambu-gray hover:text-white border-transparent'
+          }`}
+        >
+          <Printer className="w-4 h-4" />
+          Virtual Printer
+          <span className={`w-2 h-2 rounded-full ${virtualPrinterRunning ? 'bg-green-400' : 'bg-gray-500'}`} />
         </button>
       </div>
 
@@ -1725,6 +1768,11 @@ export function SettingsPage() {
         </div>
       )}
 
+      {/* Virtual Printer Tab */}
+      {activeTab === 'virtual-printer' && (
+        <VirtualPrinterSettings />
+      )}
+
       {/* Delete API Key Confirmation */}
       {showDeleteAPIKeyConfirm !== null && (
         <ConfirmModal
@@ -1878,6 +1926,9 @@ export function SettingsPage() {
             return await api.importBackup(file, overwrite);
           }}
           onSuccess={() => {
+            // Reset local settings to force re-sync from restored data
+            setLocalSettings(null);
+            isInitialLoadRef.current = true;
             queryClient.invalidateQueries();
           }}
         />

@@ -63,6 +63,7 @@ from backend.app.api.routes import (
     maintenance,
     notification_templates,
     notifications,
+    pending_uploads,
     print_queue,
     printers,
     projects,
@@ -1491,6 +1492,31 @@ async def lifespan(app: FastAPI):
     # Start anonymous telemetry (opt-out via settings)
     asyncio.create_task(start_telemetry_loop(async_session))
 
+    # Initialize virtual printer manager
+    from backend.app.services.virtual_printer import virtual_printer_manager
+
+    virtual_printer_manager.set_session_factory(async_session)
+
+    # Auto-start virtual printer if enabled
+    async with async_session() as db:
+        from backend.app.api.routes.settings import get_setting
+
+        vp_enabled = await get_setting(db, "virtual_printer_enabled")
+        if vp_enabled and vp_enabled.lower() == "true":
+            vp_access_code = await get_setting(db, "virtual_printer_access_code") or ""
+            vp_mode = await get_setting(db, "virtual_printer_mode") or "immediate"
+
+            if vp_access_code:
+                try:
+                    await virtual_printer_manager.configure(
+                        enabled=True,
+                        access_code=vp_access_code,
+                        mode=vp_mode,
+                    )
+                    logging.info("Virtual printer started")
+                except Exception as e:
+                    logging.warning(f"Failed to start virtual printer: {e}")
+
     yield
 
     # Shutdown
@@ -1500,6 +1526,10 @@ async def lifespan(app: FastAPI):
     stop_ams_history_recording()
     printer_manager.disconnect_all()
     await close_spoolman_client()
+
+    # Stop virtual printer if running
+    if virtual_printer_manager.is_enabled:
+        await virtual_printer_manager.configure(enabled=False)
 
 
 app = FastAPI(
@@ -1532,6 +1562,7 @@ app.include_router(ams_history.router, prefix=app_settings.api_prefix)
 app.include_router(system.router, prefix=app_settings.api_prefix)
 app.include_router(websocket.router, prefix=app_settings.api_prefix)
 app.include_router(discovery.router, prefix=app_settings.api_prefix)
+app.include_router(pending_uploads.router, prefix=app_settings.api_prefix)
 
 
 # Serve static files (React build)

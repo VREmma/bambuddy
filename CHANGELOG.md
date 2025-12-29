@@ -2,6 +2,20 @@
 
 All notable changes to Bambuddy will be documented in this file.
 
+## [0.1.6b2] - 2025-12-29
+
+### Added
+- **Virtual Printer** - Bambuddy now emulates a Bambu Lab printer on your network! Send prints directly from Bambu Studio or Orca Slicer without needing a physical printer connection. Features include:
+  - SSDP discovery (printer appears automatically in slicer)
+  - Secure TLS/MQTT communication with auto-generated certificates
+  - Queue mode (prints go to pending uploads) or auto-start mode
+  - Configurable access code for authentication
+  - Works with Docker (requires `network_mode: host`)
+  - Persistent certificates across container rebuilds via volume mount
+
+### Fixed
+- **Backup/restore for virtual printer settings** - Virtual printer settings (enabled, access code, mode) now correctly persist after restore without being overwritten by auto-save
+
 ## [0.1.6b] - 2025-12-28
 
 ### Added

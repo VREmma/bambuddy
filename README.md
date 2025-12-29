@@ -92,6 +92,13 @@
 - External sidebar links
 - Webhooks & API keys
 
+### 🖨️ Virtual Printer
+- Emulates a Bambu Lab printer on your network
+- Send prints directly from Bambu Studio/Orca Slicer
+- Queue mode or auto-start mode
+- SSDP discovery (appears in slicer automatically)
+- Secure TLS/MQTT communication
+
 ### 🛠️ Maintenance
 - Maintenance scheduling & tracking
 - Interval reminders (hours/days)
