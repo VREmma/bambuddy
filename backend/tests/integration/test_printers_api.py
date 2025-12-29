@@ -3,9 +3,10 @@
 Tests the full request/response cycle for /api/v1/printers/ endpoints.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from httpx import AsyncClient
-from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestPrintersAPI:
@@ -26,11 +27,9 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_list_printers_with_data(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
+    async def test_list_printers_with_data(self, async_client: AsyncClient, printer_factory, db_session):
         """Verify list returns existing printers."""
-        printer = await printer_factory(name="Test Printer")
+        await printer_factory(name="Test Printer")
 
         response = await async_client.get("/api/v1/printers/")
 
@@ -66,9 +65,7 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_create_printer_duplicate_serial(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
+    async def test_create_printer_duplicate_serial(self, async_client: AsyncClient, printer_factory, db_session):
         """Verify duplicate serial number is rejected."""
         await printer_factory(serial_number="00M09A222222222")
 
@@ -90,9 +87,7 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_get_printer(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
+    async def test_get_printer(self, async_client: AsyncClient, printer_factory, db_session):
         """Verify single printer can be retrieved."""
         printer = await printer_factory(name="Get Test Printer")
 
@@ -117,48 +112,33 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_update_printer_name(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
+    async def test_update_printer_name(self, async_client: AsyncClient, printer_factory, db_session):
         """Verify printer name can be updated."""
         printer = await printer_factory(name="Original Name")
 
-        response = await async_client.patch(
-            f"/api/v1/printers/{printer.id}",
-            json={"name": "Updated Name"}
-        )
+        response = await async_client.patch(f"/api/v1/printers/{printer.id}", json={"name": "Updated Name"})
 
         assert response.status_code == 200
         assert response.json()["name"] == "Updated Name"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_update_printer_active_status(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
+    async def test_update_printer_active_status(self, async_client: AsyncClient, printer_factory, db_session):
         """Verify printer active status can be updated."""
         printer = await printer_factory(is_active=True)
 
-        response = await async_client.patch(
-            f"/api/v1/printers/{printer.id}",
-            json={"is_active": False}
-        )
+        response = await async_client.patch(f"/api/v1/printers/{printer.id}", json={"is_active": False})
 
         assert response.status_code == 200
         assert response.json()["is_active"] is False
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_update_printer_auto_archive(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
+    async def test_update_printer_auto_archive(self, async_client: AsyncClient, printer_factory, db_session):
         """Verify auto_archive setting can be updated."""
         printer = await printer_factory(auto_archive=True)
 
-        response = await async_client.patch(
-            f"/api/v1/printers/{printer.id}",
-            json={"auto_archive": False}
-        )
+        response = await async_client.patch(f"/api/v1/printers/{printer.id}", json={"auto_archive": False})
 
         assert response.status_code == 200
         assert response.json()["auto_archive"] is False
@@ -167,10 +147,7 @@ class TestPrintersAPI:
     @pytest.mark.integration
     async def test_update_nonexistent_printer(self, async_client: AsyncClient):
         """Verify updating non-existent printer returns 404."""
-        response = await async_client.patch(
-            "/api/v1/printers/9999",
-            json={"name": "New Name"}
-        )
+        response = await async_client.patch("/api/v1/printers/9999", json={"name": "New Name"})
 
         assert response.status_code == 404
 
@@ -180,9 +157,7 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_delete_printer(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
+    async def test_delete_printer(self, async_client: AsyncClient, printer_factory, db_session):
         """Verify printer can be deleted."""
         printer = await printer_factory()
         printer_id = printer.id
@@ -234,14 +209,13 @@ class TestPrintersAPI:
     # Test connection endpoint
     # ========================================================================
 
+
 class TestPrinterDataIntegrity:
     """Tests for printer data integrity."""
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_printer_stores_all_fields(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
+    async def test_printer_stores_all_fields(self, async_client: AsyncClient, printer_factory, db_session):
         """Verify printer stores all fields correctly."""
         printer = await printer_factory(
             name="Full Test Printer",
@@ -265,20 +239,55 @@ class TestPrinterDataIntegrity:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_printer_update_persists(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
+    async def test_printer_update_persists(self, async_client: AsyncClient, printer_factory, db_session):
         """CRITICAL: Verify printer updates persist."""
         printer = await printer_factory(name="Original", is_active=True)
 
         # Update
-        await async_client.patch(
-            f"/api/v1/printers/{printer.id}",
-            json={"name": "Updated", "is_active": False}
-        )
+        await async_client.patch(f"/api/v1/printers/{printer.id}", json={"name": "Updated", "is_active": False})
 
         # Verify persistence
         response = await async_client.get(f"/api/v1/printers/{printer.id}")
         result = response.json()
         assert result["name"] == "Updated"
         assert result["is_active"] is False
+
+    # ========================================================================
+    # Refresh status endpoint
+    # ========================================================================
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_refresh_status_not_found(self, async_client: AsyncClient):
+        """Verify 404 for non-existent printer."""
+        response = await async_client.post("/api/v1/printers/99999/refresh-status")
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_refresh_status_not_connected(self, async_client: AsyncClient, printer_factory):
+        """Verify 400 when printer is not connected."""
+        printer = await printer_factory(name="Disconnected Printer")
+
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.request_status_update.return_value = False
+
+            response = await async_client.post(f"/api/v1/printers/{printer.id}/refresh-status")
+
+            assert response.status_code == 400
+            assert "not connected" in response.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_refresh_status_success(self, async_client: AsyncClient, printer_factory):
+        """Verify successful refresh request."""
+        printer = await printer_factory(name="Connected Printer")
+
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.request_status_update.return_value = True
+
+            response = await async_client.post(f"/api/v1/printers/{printer.id}/refresh-status")
+
+            assert response.status_code == 200
+            assert response.json()["status"] == "refresh_requested"
+            mock_pm.request_status_update.assert_called_once_with(printer.id)
