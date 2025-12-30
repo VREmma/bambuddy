@@ -453,21 +453,9 @@ export function Layout() {
         {/* Footer */}
         <div className="p-2 border-t border-bambu-dark-tertiary">
           {isMobile || sidebarExpanded ? (
-            <div className="flex items-center justify-between px-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-bambu-gray">v{versionInfo?.version || '...'}</span>
-                {updateCheck?.update_available && (
-                  <button
-                    onClick={() => navigate('/settings')}
-                    className="flex items-center gap-1 text-xs text-bambu-green hover:text-bambu-green/80 transition-colors"
-                    title={t('nav.updateAvailable', { version: updateCheck.latest_version })}
-                  >
-                    <ArrowUpCircle className="w-4 h-4" />
-                    <span>{t('nav.update')}</span>
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-1">
+            <div className="flex flex-col gap-2 px-2">
+              {/* Top row: icons */}
+              <div className="flex items-center justify-center gap-1">
                 {hasSwitchbarPlugs && (
                   <div className="relative">
                     <button
@@ -518,6 +506,20 @@ export function Layout() {
                 >
                   {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                 </button>
+              </div>
+              {/* Bottom row: version */}
+              <div className="flex items-center justify-center gap-2">
+                <span className="text-sm text-bambu-gray">v{versionInfo?.version || '...'}</span>
+                {updateCheck?.update_available && (
+                  <button
+                    onClick={() => navigate('/settings')}
+                    className="flex items-center gap-1 text-xs text-bambu-green hover:text-bambu-green/80 transition-colors"
+                    title={t('nav.updateAvailable', { version: updateCheck.latest_version })}
+                  >
+                    <ArrowUpCircle className="w-4 h-4" />
+                    <span>{t('nav.update')}</span>
+                  </button>
+                )}
               </div>
             </div>
           ) : (
