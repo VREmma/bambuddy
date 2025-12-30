@@ -1819,31 +1819,50 @@ async def reprint_archive(
     db: AsyncSession = Depends(get_db),
 ):
     """Send an archived 3MF file to a printer and start printing."""
+    import time
+
     from backend.app.main import register_expected_print
     from backend.app.models.printer import Printer
     from backend.app.services.bambu_ftp import upload_file_async
     from backend.app.services.printer_manager import printer_manager
 
+    logger.info(f"[REPRINT-DEBUG] === REPRINT STARTED: archive_id={archive_id}, printer_id={printer_id} ===")
+    start_time = time.time()
+
     # Get archive
     service = ArchiveService(db)
     archive = await service.get_archive(archive_id)
     if not archive:
+        logger.warning(f"[REPRINT-DEBUG] Archive not found: {archive_id}")
         raise HTTPException(404, "Archive not found")
+    logger.debug(f"[REPRINT-DEBUG] Archive found: filename={archive.filename}, file_path={archive.file_path}")
 
     # Get printer
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
     printer = result.scalar_one_or_none()
     if not printer:
+        logger.warning(f"[REPRINT-DEBUG] Printer not found: {printer_id}")
         raise HTTPException(404, "Printer not found")
+    logger.debug(
+        f"[REPRINT-DEBUG] Printer found: name={printer.name}, ip={printer.ip_address}, serial={printer.serial_number}"
+    )
 
     # Check printer is connected
-    if not printer_manager.is_connected(printer_id):
+    is_connected = printer_manager.is_connected(printer_id)
+    logger.debug(f"[REPRINT-DEBUG] Printer connected check: {is_connected}")
+    if not is_connected:
+        logger.warning(f"[REPRINT-DEBUG] Printer not connected: {printer_id}")
         raise HTTPException(400, "Printer is not connected")
 
     # Get the sliced 3MF file path
     file_path = settings.base_dir / archive.file_path
+    logger.debug(f"[REPRINT-DEBUG] Local file path: {file_path}, exists={file_path.exists()}")
     if not file_path.exists():
+        logger.warning(f"[REPRINT-DEBUG] Archive file not found on disk: {file_path}")
         raise HTTPException(404, "Archive file not found")
+
+    file_size = file_path.stat().st_size
+    logger.info(f"[REPRINT-DEBUG] File size: {file_size} bytes")
 
     # Upload file to printer via FTP
     from backend.app.services.bambu_ftp import delete_file_async
@@ -1858,46 +1877,69 @@ async def reprint_archive(
     remote_filename = f"{base_name}.3mf"
     remote_path = f"/{remote_filename}"
 
+    logger.info(f"[REPRINT-DEBUG] Remote filename: {remote_filename}")
+    logger.info(f"[REPRINT-DEBUG] Remote path: {remote_path}")
+
     # Delete existing file if present (avoids 553 error)
+    logger.debug(f"[REPRINT-DEBUG] Deleting existing file (if any): {remote_path}")
+    delete_start = time.time()
     await delete_file_async(
         printer.ip_address,
         printer.access_code,
         remote_path,
     )
+    logger.debug(f"[REPRINT-DEBUG] Delete completed in {time.time() - delete_start:.2f}s")
 
+    logger.info(f"[REPRINT-DEBUG] Starting FTP upload to {printer.ip_address}...")
+    upload_start = time.time()
     uploaded = await upload_file_async(
         printer.ip_address,
         printer.access_code,
         file_path,
         remote_path,
     )
+    upload_time = time.time() - upload_start
+    logger.info(f"[REPRINT-DEBUG] FTP upload result: {uploaded} (took {upload_time:.2f}s)")
 
     if not uploaded:
+        logger.error(f"[REPRINT-DEBUG] FTP upload FAILED after {upload_time:.2f}s")
         raise HTTPException(500, "Failed to upload file to printer")
 
     # Register this as an expected print so we don't create a duplicate archive
+    logger.debug(f"[REPRINT-DEBUG] Registering expected print: printer_id={printer_id}, filename={remote_filename}")
     register_expected_print(printer_id, remote_filename, archive_id)
 
     # Detect plate ID from 3MF file
     plate_id = 1
     try:
         with zipfile.ZipFile(file_path, "r") as zf:
-            for name in zf.namelist():
+            gcode_files = [n for n in zf.namelist() if n.startswith("Metadata/plate_") and n.endswith(".gcode")]
+            logger.debug(f"[REPRINT-DEBUG] Found gcode files in 3MF: {gcode_files}")
+            for name in gcode_files:
                 if name.startswith("Metadata/plate_") and name.endswith(".gcode"):
                     # Extract plate number from "Metadata/plate_X.gcode"
                     plate_str = name[15:-6]  # Remove "Metadata/plate_" and ".gcode"
                     plate_id = int(plate_str)
                     break
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[REPRINT-DEBUG] Plate detection failed: {e}")
         pass  # Default to plate 1 if detection fails
 
-    logger.info(f"Reprint archive {archive_id}: using plate_id={plate_id}")
+    logger.info(f"[REPRINT-DEBUG] Detected plate_id={plate_id}")
 
     # Start the print
+    logger.info(
+        f"[REPRINT-DEBUG] Calling printer_manager.start_print(printer_id={printer_id}, filename={remote_filename}, plate_id={plate_id})"
+    )
     started = printer_manager.start_print(printer_id, remote_filename, plate_id)
+    logger.info(f"[REPRINT-DEBUG] start_print result: {started}")
 
     if not started:
+        logger.error("[REPRINT-DEBUG] start_print FAILED - printer may have rejected the command")
         raise HTTPException(500, "Failed to start print")
+
+    total_time = time.time() - start_time
+    logger.info(f"[REPRINT-DEBUG] === REPRINT COMPLETED in {total_time:.2f}s ===")
 
     return {
         "status": "printing",

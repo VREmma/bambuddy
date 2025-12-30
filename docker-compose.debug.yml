@@ -1,0 +1,20 @@
+# Docker Compose override for DEBUG mode
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build
+#
+# Or set as default:
+#   export COMPOSE_FILE=docker-compose.yml:docker-compose.debug.yml
+#   docker compose up --build
+#
+# Debug prefixes to look for in logs:
+#   [FTP-DEBUG]     - FTP/TLS connection and transfer details
+#   [MQTT-DEBUG]    - MQTT connection, commands, and responses
+#   [REPRINT-DEBUG] - Reprint endpoint flow
+
+services:
+  bambuddy:
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - LOG_TO_FILE=true

@@ -306,9 +306,13 @@ class BambuMQTTClient:
         return self.state.connected
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
+        logger.debug(f"[MQTT-DEBUG] [{self.serial_number}] _on_connect called: rc={rc}, flags={flags}")
         if rc == 0:
+            logger.info(f"[MQTT-DEBUG] [{self.serial_number}] MQTT connected successfully!")
             self.state.connected = True
+            logger.debug(f"[MQTT-DEBUG] [{self.serial_number}] Subscribing to: {self.topic_subscribe}")
             client.subscribe(self.topic_subscribe)
+            logger.debug(f"[MQTT-DEBUG] [{self.serial_number}] Publishing to: {self.topic_publish}")
             # Request full status update (includes nozzle info in push_status response)
             self._request_push_all()
             # Note: get_accessories returns stale nozzle data on H2D, so we don't use it.
@@ -319,6 +323,7 @@ class BambuMQTTClient:
             if self.on_state_change:
                 self.on_state_change(self.state)
         else:
+            logger.warning(f"[MQTT-DEBUG] [{self.serial_number}] MQTT connection FAILED: rc={rc}")
             self.state.connected = False
 
     def _on_disconnect(self, client, userdata, disconnect_flags=None, rc=None, properties=None):
@@ -342,6 +347,30 @@ class BambuMQTTClient:
             # Track last message time - receiving a message proves we're connected
             self._last_message_time = time.time()
             self.state.connected = True
+
+            # DEBUG: Log all incoming messages for debugging
+            logger.debug(f"[MQTT-DEBUG] [{self.serial_number}] Received message on topic: {msg.topic}")
+
+            # DEBUG: Log command responses (these are replies to our commands)
+            if "print" in payload:
+                print_data = payload["print"]
+                if "command" in print_data:
+                    logger.info(f"[MQTT-DEBUG] [{self.serial_number}] COMMAND RESPONSE: {json.dumps(print_data)}")
+                if "result" in print_data:
+                    logger.info(
+                        f"[MQTT-DEBUG] [{self.serial_number}] COMMAND RESULT: result={print_data.get('result')}, reason={print_data.get('reason', 'N/A')}"
+                    )
+
+            # DEBUG: Log HMS errors immediately
+            if "print" in payload and "hms" in payload.get("print", {}):
+                logger.info(f"[MQTT-DEBUG] [{self.serial_number}] HMS ERRORS IN MESSAGE: {payload['print']['hms']}")
+
+            # DEBUG: Log print_error field
+            if "print" in payload and "print_error" in payload.get("print", {}):
+                print_error = payload["print"]["print_error"]
+                if print_error and print_error != 0:
+                    logger.info(f"[MQTT-DEBUG] [{self.serial_number}] PRINT_ERROR: 0x{print_error:08X}")
+
             # TEMP: Dump full payload once to find extruder state field
             if not hasattr(self, "_payload_dumped"):
                 self._payload_dumped = True
@@ -1693,6 +1722,11 @@ class BambuMQTTClient:
 
         The file should already be uploaded to /cache/ on the printer via FTP.
         """
+        logger.debug(f"[MQTT-DEBUG] start_print called: filename={filename}, plate_id={plate_id}")
+        logger.debug(
+            f"[MQTT-DEBUG] Client connected: {self._client is not None}, State connected: {self.state.connected}"
+        )
+
         if self._client and self.state.connected:
             # Bambu print command format
             # Based on: https://github.com/darkorb/bambu-ftp-and-print
@@ -1711,10 +1745,24 @@ class BambuMQTTClient:
                     "use_ams": True,
                 }
             }
-            logger.info(f"[{self.serial_number}] Sending print command: {json.dumps(command)}")
-            self._client.publish(self.topic_publish, json.dumps(command), qos=1)
+            command_json = json.dumps(command)
+            logger.info(f"[{self.serial_number}] Sending print command: {command_json}")
+            logger.debug(f"[MQTT-DEBUG] Publishing to topic: {self.topic_publish}")
+            logger.debug(
+                f"[MQTT-DEBUG] Command details: filename={filename}, plate_id={plate_id}, url=ftp://{filename}"
+            )
+
+            result = self._client.publish(self.topic_publish, command_json, qos=1)
+            logger.debug(
+                f"[MQTT-DEBUG] Publish result: rc={result.rc}, mid={result.mid}, is_published={result.is_published()}"
+            )
+
             return True
-        return False
+        else:
+            logger.warning(
+                f"[MQTT-DEBUG] Cannot start print - client={self._client is not None}, connected={self.state.connected}"
+            )
+            return False
 
     def stop_print(self) -> bool:
         """Stop the current print job."""

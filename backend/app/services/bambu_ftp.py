@@ -1,10 +1,11 @@
-import ssl
-import socket
 import asyncio
 import logging
-from ftplib import FTP_TLS, FTP
-from pathlib import Path
+import socket
+import ssl
+import time
+from ftplib import FTP, FTP_TLS
 from io import BytesIO
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,15 @@ class ImplicitFTP_TLS(FTP_TLS):
         self.ssl_context = ssl.create_default_context()
         self.ssl_context.check_hostname = False
         self.ssl_context.verify_mode = ssl.CERT_NONE
+        # DEBUG: Log SSL context settings
+        logger.debug(
+            f"[FTP-DEBUG] SSL context created: check_hostname={self.ssl_context.check_hostname}, verify_mode={self.ssl_context.verify_mode}"
+        )
+        logger.debug(
+            f"[FTP-DEBUG] SSL minimum_version={self.ssl_context.minimum_version}, maximum_version={self.ssl_context.maximum_version}"
+        )
 
-    def connect(self, host='', port=990, timeout=-999, source_address=None):
+    def connect(self, host="", port=990, timeout=-999, source_address=None):
         """Connect to host, wrapping socket in TLS immediately (implicit FTPS)."""
         if host:
             self.host = host
@@ -30,30 +38,81 @@ class ImplicitFTP_TLS(FTP_TLS):
         if source_address:
             self.source_address = source_address
 
+        logger.debug(f"[FTP-DEBUG] Creating TCP connection to {self.host}:{self.port} timeout={self.timeout}")
+        start_time = time.time()
+
         # Create and wrap socket immediately (implicit TLS)
-        self.sock = socket.create_connection(
-            (self.host, self.port),
-            self.timeout,
-            source_address=self.source_address
-        )
+        self.sock = socket.create_connection((self.host, self.port), self.timeout, source_address=self.source_address)
+        tcp_time = time.time() - start_time
+        logger.debug(f"[FTP-DEBUG] TCP connected in {tcp_time:.3f}s, socket timeout={self.sock.gettimeout()}")
+
+        # DEBUG: Log socket options before TLS
+        try:
+            sndbuf = self.sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
+            rcvbuf = self.sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+            logger.debug(f"[FTP-DEBUG] Socket buffers: SO_SNDBUF={sndbuf}, SO_RCVBUF={rcvbuf}")
+        except Exception as e:
+            logger.debug(f"[FTP-DEBUG] Could not get socket options: {e}")
+
+        logger.debug("[FTP-DEBUG] Starting TLS handshake...")
+        tls_start = time.time()
         self.sock = self.ssl_context.wrap_socket(self.sock, server_hostname=self.host)
+        tls_time = time.time() - tls_start
+        logger.debug(f"[FTP-DEBUG] TLS handshake completed in {tls_time:.3f}s")
+
+        # DEBUG: Log TLS details
+        logger.debug(f"[FTP-DEBUG] TLS version: {self.sock.version()}")
+        logger.debug(f"[FTP-DEBUG] TLS cipher: {self.sock.cipher()}")
+        try:
+            cert = self.sock.getpeercert(binary_form=True)
+            logger.debug(f"[FTP-DEBUG] Server certificate length: {len(cert) if cert else 0} bytes")
+        except Exception as e:
+            logger.debug(f"[FTP-DEBUG] Could not get peer cert: {e}")
+
         self.af = self.sock.family
-        self.file = self.sock.makefile('r', encoding=self.encoding)
+        self.file = self.sock.makefile("r", encoding=self.encoding)
         self.welcome = self.getresp()
+        logger.debug(f"[FTP-DEBUG] FTP welcome: {self.welcome}")
         return self.welcome
 
     def ntransfercmd(self, cmd, rest=None):
         """Override to reuse SSL session for data connection (required by vsFTPd)."""
+        logger.debug(f"[FTP-DEBUG] ntransfercmd called: cmd={cmd}, rest={rest}")
+        start_time = time.time()
+
         conn, size = FTP.ntransfercmd(self, cmd, rest)
+        data_connect_time = time.time() - start_time
+        logger.debug(f"[FTP-DEBUG] Data connection established in {data_connect_time:.3f}s, size={size}")
+
         if self._prot_p:
+            logger.debug("[FTP-DEBUG] Wrapping data connection in TLS (session reuse)...")
+            tls_start = time.time()
             # Reuse the SSL session from the control connection
             conn = self.ssl_context.wrap_socket(
                 conn,
                 server_hostname=self.host,
-                session=self.sock.session  # Reuse session!
+                session=self.sock.session,  # Reuse session!
+            )
+            tls_time = time.time() - tls_start
+            logger.debug(
+                f"[FTP-DEBUG] Data TLS handshake in {tls_time:.3f}s, version={conn.version()}, cipher={conn.cipher()}"
             )
         return conn, size
 
+    def sendcmd(self, cmd):
+        """Override to log all FTP commands."""
+        # Don't log password
+        log_cmd = cmd if not cmd.upper().startswith("PASS") else "PASS ****"
+        logger.debug(f"[FTP-DEBUG] >>> {log_cmd}")
+        response = super().sendcmd(cmd)
+        logger.debug(f"[FTP-DEBUG] <<< {response}")
+        return response
+
+    def getresp(self):
+        """Override to log all FTP responses."""
+        response = super().getresp()
+        logger.debug(f"[FTP-DEBUG] <<< {response}")
+        return response
 
 
 class BambuFTPClient:
@@ -69,14 +128,27 @@ class BambuFTPClient:
     def connect(self) -> bool:
         """Connect to the printer FTP server (implicit FTPS on port 990)."""
         try:
+            logger.debug(f"[FTP-DEBUG] BambuFTPClient.connect() to {self.ip_address}:{self.FTP_PORT}")
             self._ftp = ImplicitFTP_TLS()
+            self._ftp.set_debuglevel(2)  # Enable ftplib debug output
+
+            logger.debug("[FTP-DEBUG] Calling connect()...")
             self._ftp.connect(self.ip_address, self.FTP_PORT, timeout=10)
+
+            logger.debug("[FTP-DEBUG] Calling login(bblp, ****)...")
             self._ftp.login("bblp", self.access_code)
+
+            logger.debug("[FTP-DEBUG] Calling prot_p() for protected data channel...")
             self._ftp.prot_p()
+
+            logger.debug("[FTP-DEBUG] Calling set_pasv(True) for passive mode...")
             self._ftp.set_pasv(True)
+
+            logger.debug("[FTP-DEBUG] Connection successful!")
             return True
         except Exception as e:
             logger.warning(f"FTP connection failed to {self.ip_address}: {e}")
+            logger.debug("[FTP-DEBUG] Connection exception details:", exc_info=True)
             self._ftp = None
             return False
 
@@ -112,6 +184,7 @@ class BambuFTPClient:
                     mtime = None
                     try:
                         from datetime import datetime
+
                         month = parts[5]
                         day = parts[6]
                         time_or_year = parts[7]
@@ -183,18 +256,49 @@ class BambuFTPClient:
     def upload_file(self, local_path: Path, remote_path: str) -> bool:
         """Upload a file to the printer."""
         if not self._ftp:
-            logger.warning(f"upload_file: FTP not connected")
+            logger.warning("upload_file: FTP not connected")
             return False
 
         try:
             file_size = local_path.stat().st_size if local_path.exists() else 0
             logger.info(f"FTP uploading {local_path} ({file_size} bytes) to {remote_path}")
+            logger.debug(f"[FTP-DEBUG] Starting upload: file_size={file_size}, remote_path={remote_path}")
+
+            # Track upload progress
+            bytes_sent = 0
+            last_log_time = time.time()
+            start_time = time.time()
+
+            def upload_callback(block):
+                nonlocal bytes_sent, last_log_time
+                bytes_sent += len(block)
+                now = time.time()
+                # Log progress every 5 seconds
+                if now - last_log_time >= 5:
+                    elapsed = now - start_time
+                    speed = bytes_sent / elapsed if elapsed > 0 else 0
+                    percent = (bytes_sent / file_size * 100) if file_size > 0 else 0
+                    logger.debug(
+                        f"[FTP-DEBUG] Upload progress: {bytes_sent}/{file_size} bytes ({percent:.1f}%), speed={speed/1024:.1f} KB/s, elapsed={elapsed:.1f}s"
+                    )
+                    last_log_time = now
+
+            logger.debug(f"[FTP-DEBUG] Calling storbinary(STOR {remote_path})...")
             with open(local_path, "rb") as f:
-                self._ftp.storbinary(f"STOR {remote_path}", f)
-            logger.info(f"FTP upload complete: {remote_path}")
+                # Use custom callback to track progress
+                self._ftp.storbinary(f"STOR {remote_path}", f, callback=upload_callback)
+
+            elapsed = time.time() - start_time
+            speed = file_size / elapsed if elapsed > 0 else 0
+            logger.info(
+                f"FTP upload complete: {remote_path} ({file_size} bytes in {elapsed:.1f}s, {speed/1024:.1f} KB/s)"
+            )
+            logger.debug("[FTP-DEBUG] Upload finished successfully")
             return True
         except Exception as e:
-            logger.error(f"FTP upload failed for {remote_path}: {e}")
+            elapsed = time.time() - start_time if "start_time" in locals() else 0
+            logger.error(f"FTP upload failed for {remote_path}: {e} (after {elapsed:.1f}s)")
+            logger.debug("[FTP-DEBUG] Upload exception details:", exc_info=True)
             return False
 
     def upload_bytes(self, data: bytes, remote_path: str) -> bool:
@@ -320,10 +424,7 @@ async def download_file_try_paths_async(
             return False
 
         try:
-            for remote_path in remote_paths:
-                if client.download_to_file(remote_path, local_path):
-                    return True
-            return False
+            return any(client.download_to_file(remote_path, local_path) for remote_path in remote_paths)
         finally:
             client.disconnect()
 
