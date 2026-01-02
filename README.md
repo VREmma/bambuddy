@@ -55,6 +55,7 @@
 ### 📊 Monitoring & Control
 - Real-time printer status via WebSocket
 - Live camera streaming (MJPEG) & snapshots
+- Fan status monitoring (part cooling, auxiliary, chamber)
 - Printer control (stop, pause, resume)
 - Skip objects during print
 - AMS slot RFID re-read

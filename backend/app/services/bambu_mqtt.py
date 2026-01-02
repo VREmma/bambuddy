@@ -150,6 +150,11 @@ class PrinterState:
     printable_objects: dict = field(default_factory=dict)
     # Objects that have been skipped during the current print
     skipped_objects: list = field(default_factory=list)
+    # Fan speeds (0-100 percentage, None if not available for this model)
+    cooling_fan_speed: int | None = None  # Part cooling fan
+    big_fan1_speed: int | None = None  # Auxiliary fan
+    big_fan2_speed: int | None = None  # Chamber/exhaust fan
+    heatbreak_fan_speed: int | None = None  # Hotend heatbreak fan
 
 
 # Stage name mapping from BambuStudio DeviceManager.cpp
@@ -911,6 +916,40 @@ class BambuMQTTClient:
             self.state.layer_num = int(data["layer_num"])
         if "total_layer_num" in data:
             self.state.total_layers = int(data["total_layer_num"])
+
+        # Fan speeds (MQTT sends as string "0"-"15" representing speed levels, or percentage)
+        # Convert to 0-100 percentage for display
+        def parse_fan_speed(value: str | int | None) -> int | None:
+            if value is None:
+                return None
+            try:
+                speed = int(value)
+                # MQTT reports 0-15 speed levels, convert to percentage (0-100)
+                # 15 = 100%, so multiply by 100/15 ≈ 6.67
+                if speed <= 15:
+                    return round(speed * 100 / 15)
+                # If already a percentage (0-255 scale from some printers), convert
+                elif speed <= 255:
+                    return round(speed * 100 / 255)
+                return speed
+            except (ValueError, TypeError):
+                return None
+
+        # Log fan fields once for debugging
+        if not hasattr(self, "_fan_fields_logged"):
+            fan_fields = {k: v for k, v in data.items() if "fan" in k.lower()}
+            if fan_fields:
+                logger.info(f"[{self.serial_number}] Fan fields in MQTT data: {fan_fields}")
+                self._fan_fields_logged = True
+
+        if "cooling_fan_speed" in data:
+            self.state.cooling_fan_speed = parse_fan_speed(data["cooling_fan_speed"])
+        if "big_fan1_speed" in data:
+            self.state.big_fan1_speed = parse_fan_speed(data["big_fan1_speed"])
+        if "big_fan2_speed" in data:
+            self.state.big_fan2_speed = parse_fan_speed(data["big_fan2_speed"])
+        if "heatbreak_fan_speed" in data:
+            self.state.heatbreak_fan_speed = parse_fan_speed(data["heatbreak_fan_speed"])
 
         # Calibration stage tracking
         if "stg_cur" in data:

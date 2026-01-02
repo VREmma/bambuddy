@@ -165,6 +165,11 @@ export interface PrinterStatus {
   last_ams_update: number;
   // Number of printable objects in current print (for skip objects feature)
   printable_objects_count: number;
+  // Fan speeds (0-100 percentage, null if not available for this model)
+  cooling_fan_speed: number | null;  // Part cooling fan
+  big_fan1_speed: number | null;     // Auxiliary fan
+  big_fan2_speed: number | null;     // Chamber/exhaust fan
+  heatbreak_fan_speed: number | null; // Hotend heatbreak fan
 }
 
 export interface PrinterCreate {

@@ -64,9 +64,19 @@ All notable changes to Bambuddy will be documented in this file.
   - Progress bar tracks items toward target count
   - Useful for batch printing (e.g., 10 copies in one print = 10 items)
   - Default quantity of 1 for backwards compatibility
+- **Fan status display** - Real-time fan speeds in new Controls section:
+  - Part cooling fan, Auxiliary fan, Chamber fan status
+  - Distinct icons for each fan type (Fan, Wind, AirVent)
+  - Dynamic coloring: active fans show colored, off fans show gray
+  - Percentage display (0-100%)
+  - Real-time updates via WebSocket
+  - Always visible on printer cards in expanded view
 
 ### Changed
-- **Temperature cards layout** - Refactored printer card layout with slimmer temperature displays to make room for control buttons
+- **Printer card layout** - Reorganized expanded view with new Controls section:
+  - Temperature display is now standalone (no longer shares row with buttons)
+  - New Controls section contains fan status (left) and print buttons (right)
+  - Removed divider lines before Controls and Filaments sections for cleaner look
 - **Cover image availability** - Print cover image now shown in PAUSE/PAUSED states (not just RUNNING) for skip objects modal
 - **Spoolman info banner** - Updated settings UI with clearer sync documentation
 

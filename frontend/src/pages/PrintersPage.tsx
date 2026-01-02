@@ -34,6 +34,9 @@ import {
   Play,
   X,
   Monitor,
+  Fan,
+  Wind,
+  AirVent,
 } from 'lucide-react';
 
 // Custom Skip Objects icon - arrow jumping over boxes
@@ -1581,101 +1584,156 @@ function PrinterCard({
               </>
             )}
 
-            {/* Temperatures + Print Controls */}
+            {/* Temperatures */}
             {status.temperatures && viewMode === 'expanded' && (() => {
               // Use actual heater states from MQTT stream
               const nozzleHeating = status.temperatures.nozzle_heating || status.temperatures.nozzle_2_heating || false;
               const bedHeating = status.temperatures.bed_heating || false;
               const chamberHeating = status.temperatures.chamber_heating || false;
 
+              return (
+                <div className="grid grid-cols-3 gap-2">
+                  {/* Nozzle temp - combined for dual nozzle */}
+                  <div className="text-center p-2 bg-bambu-dark rounded-lg">
+                    <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-orange-400" isHeating={nozzleHeating} />
+                    {status.temperatures.nozzle_2 !== undefined ? (
+                      <>
+                        <p className="text-[10px] text-bambu-gray">L / R</p>
+                        <p className="text-xs text-white">
+                          {Math.round(status.temperatures.nozzle || 0)}° / {Math.round(status.temperatures.nozzle_2 || 0)}°
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[10px] text-bambu-gray">Nozzle</p>
+                        <p className="text-xs text-white">
+                          {Math.round(status.temperatures.nozzle || 0)}°C
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  <div className="text-center p-2 bg-bambu-dark rounded-lg">
+                    <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-blue-400" isHeating={bedHeating} />
+                    <p className="text-[10px] text-bambu-gray">Bed</p>
+                    <p className="text-xs text-white">
+                      {Math.round(status.temperatures.bed || 0)}°C
+                    </p>
+                  </div>
+                  {status.temperatures.chamber !== undefined ? (
+                    <div className="text-center p-2 bg-bambu-dark rounded-lg">
+                      <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-green-400" isHeating={chamberHeating} />
+                      <p className="text-[10px] text-bambu-gray">Chamber</p>
+                      <p className="text-xs text-white">
+                        {Math.round(status.temperatures.chamber || 0)}°C
+                      </p>
+                    </div>
+                  ) : (
+                    <div /> /* Empty placeholder to maintain grid */
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Controls - Fans + Print Buttons */}
+            {viewMode === 'expanded' && (() => {
               // Determine print state for control buttons
               const isRunning = status.state === 'RUNNING';
               const isPaused = status.state === 'PAUSED' || status.state === 'PAUSE';
               const isPrinting = isRunning || isPaused;
               const isControlBusy = stopPrintMutation.isPending || pausePrintMutation.isPending || resumePrintMutation.isPending;
 
+              // Fan data
+              const partFan = status.cooling_fan_speed;
+              const auxFan = status.big_fan1_speed;
+              const chamberFan = status.big_fan2_speed;
+
               return (
-                <div className="flex gap-3">
-                  {/* Temperature cards */}
-                  <div className="flex-1 grid grid-cols-3 gap-2">
-                    {/* Nozzle temp - combined for dual nozzle */}
-                    <div className="text-center p-2 bg-bambu-dark rounded-lg">
-                      <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-orange-400" isHeating={nozzleHeating} />
-                      {status.temperatures.nozzle_2 !== undefined ? (
-                        <>
-                          <p className="text-[10px] text-bambu-gray">L / R</p>
-                          <p className="text-xs text-white">
-                            {Math.round(status.temperatures.nozzle || 0)}° / {Math.round(status.temperatures.nozzle_2 || 0)}°
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-[10px] text-bambu-gray">Nozzle</p>
-                          <p className="text-xs text-white">
-                            {Math.round(status.temperatures.nozzle || 0)}°C
-                          </p>
-                        </>
-                      )}
-                    </div>
-                    <div className="text-center p-2 bg-bambu-dark rounded-lg">
-                      <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-blue-400" isHeating={bedHeating} />
-                      <p className="text-[10px] text-bambu-gray">Bed</p>
-                      <p className="text-xs text-white">
-                        {Math.round(status.temperatures.bed || 0)}°C
-                      </p>
-                    </div>
-                    {status.temperatures.chamber !== undefined ? (
-                      <div className="text-center p-2 bg-bambu-dark rounded-lg">
-                        <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-green-400" isHeating={chamberHeating} />
-                        <p className="text-[10px] text-bambu-gray">Chamber</p>
-                        <p className="text-xs text-white">
-                          {Math.round(status.temperatures.chamber || 0)}°C
-                        </p>
-                      </div>
-                    ) : (
-                      <div /> /* Empty placeholder to maintain grid */
-                    )}
+                <div className="mt-3">
+                  {/* Section Header */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] uppercase tracking-wider text-bambu-gray font-medium">
+                      Controls
+                    </span>
+                    <div className="flex-1 h-px bg-bambu-dark-tertiary/30" />
                   </div>
 
-                  {/* Print control buttons */}
-                  <div className="flex flex-col justify-center gap-1.5 w-20">
-                    {/* Stop button - visible when printing/paused */}
-                    <button
-                      onClick={() => setShowStopConfirm(true)}
-                      disabled={!isPrinting || isControlBusy}
-                      className={`
-                        flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium
-                        transition-colors
-                        ${isPrinting
-                          ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                          : 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed'
-                        }
-                      `}
-                      title="Stop print"
-                    >
-                      <Square className="w-3 h-3" />
-                      Stop
-                    </button>
+                  <div className="flex items-center justify-between gap-2">
+                    {/* Left: Fan Status - always visible, dynamic coloring */}
+                    <div className="flex items-center gap-2">
+                      {/* Part Cooling Fan */}
+                      <div
+                        className={`flex items-center gap-1 px-1.5 py-1 rounded ${partFan && partFan > 0 ? 'bg-cyan-500/10' : 'bg-bambu-dark'}`}
+                        title="Part Cooling Fan"
+                      >
+                        <Fan className={`w-3.5 h-3.5 ${partFan && partFan > 0 ? 'text-cyan-400' : 'text-bambu-gray/50'}`} />
+                        <span className={`text-[10px] ${partFan && partFan > 0 ? 'text-cyan-400' : 'text-bambu-gray/50'}`}>
+                          {partFan ?? 0}%
+                        </span>
+                      </div>
 
-                    {/* Pause/Resume button */}
-                    <button
-                      onClick={() => isPaused ? setShowResumeConfirm(true) : setShowPauseConfirm(true)}
-                      disabled={!isPrinting || isControlBusy}
-                      className={`
-                        flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium
-                        transition-colors
-                        ${isPrinting
-                          ? isPaused
-                            ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
-                            : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
-                          : 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed'
-                        }
-                      `}
-                      title={isPaused ? 'Resume print' : 'Pause print'}
-                    >
-                      {isPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
-                      {isPaused ? 'Resume' : 'Pause'}
-                    </button>
+                      {/* Auxiliary Fan */}
+                      <div
+                        className={`flex items-center gap-1 px-1.5 py-1 rounded ${auxFan && auxFan > 0 ? 'bg-blue-500/10' : 'bg-bambu-dark'}`}
+                        title="Auxiliary Fan"
+                      >
+                        <Wind className={`w-3.5 h-3.5 ${auxFan && auxFan > 0 ? 'text-blue-400' : 'text-bambu-gray/50'}`} />
+                        <span className={`text-[10px] ${auxFan && auxFan > 0 ? 'text-blue-400' : 'text-bambu-gray/50'}`}>
+                          {auxFan ?? 0}%
+                        </span>
+                      </div>
+
+                      {/* Chamber Fan */}
+                      <div
+                        className={`flex items-center gap-1 px-1.5 py-1 rounded ${chamberFan && chamberFan > 0 ? 'bg-green-500/10' : 'bg-bambu-dark'}`}
+                        title="Chamber Fan"
+                      >
+                        <AirVent className={`w-3.5 h-3.5 ${chamberFan && chamberFan > 0 ? 'text-green-400' : 'text-bambu-gray/50'}`} />
+                        <span className={`text-[10px] ${chamberFan && chamberFan > 0 ? 'text-green-400' : 'text-bambu-gray/50'}`}>
+                          {chamberFan ?? 0}%
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Right: Print Control Buttons */}
+                    <div className="flex items-center gap-2">
+                      {/* Stop button */}
+                      <button
+                        onClick={() => setShowStopConfirm(true)}
+                        disabled={!isPrinting || isControlBusy}
+                        className={`
+                          flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium
+                          transition-colors
+                          ${isPrinting
+                            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                            : 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed'
+                          }
+                        `}
+                        title="Stop print"
+                      >
+                        <Square className="w-3 h-3" />
+                        Stop
+                      </button>
+
+                      {/* Pause/Resume button */}
+                      <button
+                        onClick={() => isPaused ? setShowResumeConfirm(true) : setShowPauseConfirm(true)}
+                        disabled={!isPrinting || isControlBusy}
+                        className={`
+                          flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium
+                          transition-colors
+                          ${isPrinting
+                            ? isPaused
+                              ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
+                              : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
+                            : 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed'
+                          }
+                        `}
+                        title={isPaused ? 'Resume print' : 'Pause print'}
+                      >
+                        {isPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+                        {isPaused ? 'Resume' : 'Pause'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1689,9 +1747,9 @@ function PrinterCard({
               const isDualNozzle = printer.nozzle_count === 2 || status?.temperatures?.nozzle_2 !== undefined;
 
               return (
-                <div className="mt-4 pt-3 border-t border-bambu-dark-tertiary/50">
+                <div className="mt-3">
                   {/* Section Header */}
-                  <div className="flex items-center gap-2 mb-3">
+                  <div className="flex items-center gap-2 mb-2">
                     <span className="text-[10px] uppercase tracking-wider text-bambu-gray font-medium">
                       Filaments
                     </span>
