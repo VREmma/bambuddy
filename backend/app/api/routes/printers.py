@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import zipfile
@@ -485,16 +486,31 @@ async def get_printer_cover(
 
     logger.info(f"Trying to download cover for '{filename}' from {printer.ip_address}")
 
-    try:
-        downloaded = await download_file_try_paths_async(
-            printer.ip_address,
-            printer.access_code,
-            remote_paths,
-            temp_path,
-        )
-    except Exception as e:
-        logger.error(f"FTP download exception: {e}")
-        raise HTTPException(500, f"FTP download failed: {e}")
+    # Retry logic for transient FTP failures
+    max_retries = 2
+    last_error = None
+    downloaded = False
+
+    for attempt in range(max_retries + 1):
+        try:
+            downloaded = await download_file_try_paths_async(
+                printer.ip_address,
+                printer.access_code,
+                remote_paths,
+                temp_path,
+            )
+            if downloaded:
+                break
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                logger.warning(f"FTP download attempt {attempt + 1} failed: {e}, retrying...")
+                await asyncio.sleep(0.5 * (attempt + 1))  # Brief backoff
+            else:
+                logger.error(f"FTP download failed after {max_retries + 1} attempts: {e}")
+
+    if last_error and not downloaded:
+        raise HTTPException(503, f"FTP download temporarily unavailable: {last_error}")
 
     if not downloaded:
         raise HTTPException(
