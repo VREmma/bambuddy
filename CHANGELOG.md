@@ -23,15 +23,30 @@ All notable changes to Bambuddy will be documented in this file.
   - Model change automatically restarts the virtual printer (no manual disable/enable needed)
   - Models sorted alphabetically in dropdown
 - **Pending upload delete confirmation** - Confirmation modal when discarding pending uploads in queue review mode
-- **Tasmota admin link** - Direct link to Tasmota web interface on smart plug cards
+- **Tasmota admin link** - Direct link to Tasmota web interface on smart plug cards:
+  - Auto-login using stored credentials (when available)
+  - Opens in new tab for quick access to plug settings
 - **Debug logging** - Added debug logging for printer hour counter and AMS slot mapping
+- **Demo video recorder** - Playwright-based tool for recording demo videos:
+  - Automated walkthrough of all pages
+  - Outputs WebM format, easy conversion to MP4
+  - Located in `demo-video/` directory
 
 ### Fixed
-- **Camera stream reconnection** - Improved detection of stuck camera streams with automatic reconnection
-- **Spoolman sync** - Fixed sync issues with Spoolman integration
+- **Camera stream reconnection** - Improved detection of stuck camera streams with automatic reconnection:
+  - Periodic stall detection checks every 5 seconds
+  - Automatic reconnection when stream stops receiving frames
+  - New `/api/v1/printers/{id}/camera/status` endpoint for stream health monitoring
+- **Spoolman sync** - Fixed sync issues with Spoolman integration:
+  - Now only matches Bambu Lab vendor filaments when syncing
+  - Prevents incorrect matching with third-party filaments by color alone
+  - Improved filament matching accuracy
 - **Archive card context menu** - Fixed context menu positioning issues (#46)
 - **Printer card cover image** - Fixed wrong cover image displayed for multi-plate print files
-- **Skip objects modal** - Fixed object ID markers not correctly positioned over build plate preview
+- **Skip objects modal** - Fixed object ID markers not correctly positioned over build plate preview:
+  - Now uses `bbox_all` from plate metadata for accurate coordinate mapping
+  - Markers correctly position relative to the actual object bounds in the preview image
+  - Works correctly for multi-plate projects
 - **Active AMS slot display (H2D)** - Fixed incorrect slot display on H2D printers with multiple AMS units:
   - Now parses `snow` field from `device.extruder.info` which contains actual AMS ID
   - Previously picked first AMS on the extruder, causing wrong display when multiple AMS connected
