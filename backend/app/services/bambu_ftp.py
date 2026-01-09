@@ -1,4 +1,5 @@
 import asyncio
+import ftplib
 import logging
 import os
 import socket
@@ -191,6 +192,7 @@ class BambuFTPClient:
         self,
         local_path: Path,
         remote_path: str,
+        model: str,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> bool:
         """Upload a file to the printer with optional progress callback."""
@@ -200,7 +202,7 @@ class BambuFTPClient:
 
         try:
             file_size = local_path.stat().st_size if local_path.exists() else 0
-            logger.info(f"FTP uploading {local_path} ({file_size} bytes) to {remote_path}")
+            logger.info(f"FTP uploading {local_path} ({file_size} bytes) to {remote_path} model: {model}")
 
             uploaded = 0
 
@@ -211,6 +213,9 @@ class BambuFTPClient:
                     progress_callback(uploaded, file_size)
 
             with open(local_path, "rb") as f:
+                if model == "A1":
+                    ftplib._SSLSocket = None
+
                 self._ftp.storbinary(f"STOR {remote_path}", f, callback=on_block)
             logger.info(f"FTP upload complete: {remote_path}")
             return True
@@ -358,6 +363,7 @@ async def upload_file_async(
     access_code: str,
     local_path: Path,
     remote_path: str,
+    model: str,
     timeout: float = 600.0,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> bool:
@@ -370,7 +376,7 @@ async def upload_file_async(
         if client.connect():
             logger.info(f"FTP connected to {ip_address}")
             try:
-                return client.upload_file(local_path, remote_path, progress_callback)
+                return client.upload_file(local_path, remote_path, model, progress_callback)
             finally:
                 client.disconnect()
         logger.warning(f"FTP connection failed to {ip_address}")

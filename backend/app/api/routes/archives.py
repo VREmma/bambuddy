@@ -2033,6 +2033,7 @@ async def reprint_archive(
         printer.access_code,
         file_path,
         remote_path,
+        printer.model,
     )
 
     if not uploaded:

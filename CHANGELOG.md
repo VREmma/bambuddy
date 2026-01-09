@@ -2,6 +2,13 @@
 
 All notable changes to Bambuddy will be documented in this file.
 
+## [a1_upload_fix] - 2026-01-08
+
+### Fixed
+- **Added model to upload_file call in bambu_ftp** - Added model to the upload_file calls to check for A1 model.
+  - Allows A1 printers to upload from archives, while allowing other prints to continue working
+
+
 ## [0.1.6b8] - 2026-01-08
 
 ### Added

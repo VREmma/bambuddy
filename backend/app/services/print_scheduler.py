@@ -273,10 +273,7 @@ class PrintScheduler:
 
         try:
             uploaded = await upload_file_async(
-                printer.ip_address,
-                printer.access_code,
-                file_path,
-                remote_path,
+                printer.ip_address, printer.access_code, file_path, remote_path, printer.model
             )
         except Exception as e:
             uploaded = False
