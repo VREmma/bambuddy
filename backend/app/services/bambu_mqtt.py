@@ -912,6 +912,7 @@ class BambuMQTTClient:
 
         # Merge AMS data instead of replacing, to handle partial updates
         # During prints, the printer may only send updates for active AMS units
+        # We need deep merging at the tray level to preserve fields like tray_sub_brands
         existing_ams = self.state.raw_data.get("ams", [])
         existing_by_id = {ams.get("id"): ams for ams in existing_ams if ams.get("id") is not None}
 
@@ -919,6 +920,31 @@ class BambuMQTTClient:
         for ams_unit in ams_list:
             ams_id = ams_unit.get("id")
             if ams_id is not None:
+                existing_unit = existing_by_id.get(ams_id)
+                if existing_unit and "tray" in ams_unit:
+                    # Deep merge trays to preserve fields from previous updates
+                    existing_trays = {t.get("id"): t for t in existing_unit.get("tray", []) if t.get("id") is not None}
+                    merged_trays = []
+                    for new_tray in ams_unit.get("tray", []):
+                        tray_id = new_tray.get("id")
+                        if tray_id is not None and tray_id in existing_trays:
+                            # Merge: start with existing, update with new non-empty values
+                            merged_tray = existing_trays[tray_id].copy()
+                            for key, value in new_tray.items():
+                                # Only overwrite if new value is not empty/None
+                                # Exception: remain/k can be 0, which is valid
+                                if key in ("remain", "k", "id", "cali_idx") or value not in (
+                                    None,
+                                    "",
+                                    "0000000000000000",
+                                    "00000000000000000000000000000000",
+                                ):
+                                    merged_tray[key] = value
+                            merged_trays.append(merged_tray)
+                        else:
+                            merged_trays.append(new_tray)
+                    # Update ams_unit with merged trays
+                    ams_unit = {**ams_unit, "tray": merged_trays}
                 existing_by_id[ams_id] = ams_unit
 
         # Convert back to list, sorted by ID for consistent ordering
