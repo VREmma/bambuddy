@@ -1406,6 +1406,12 @@ async def update_file(file_id: int, data: FileUpdate, db: AsyncSession = Depends
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
+    if data.filename is not None:
+        # Validate filename doesn't contain path separators
+        if "/" in data.filename or "\\" in data.filename:
+            raise HTTPException(status_code=400, detail="Filename cannot contain path separators")
+        file.filename = data.filename
+
     if data.folder_id is not None:
         if data.folder_id == 0:
             file.folder_id = None

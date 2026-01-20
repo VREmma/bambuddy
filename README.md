@@ -82,10 +82,12 @@
 ### 📁 File Manager (Library)
 - Upload and organize sliced files (3MF, gcode)
 - Folder structure with drag-and-drop
+- Rename files and folders via context menu
 - Print directly to any printer with full options
 - Add to queue without creating archive upfront
 - Plate selection for multi-plate 3MF files
 - Duplicate detection via file hash
+- Mobile-friendly with always-visible action buttons
 
 ### 📁 Projects
 - Group related prints (e.g., "Voron Build")

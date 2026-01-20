@@ -80,6 +80,7 @@ class FileCreate(BaseModel):
 class FileUpdate(BaseModel):
     """Schema for updating a file."""
 
+    filename: str | None = Field(None, min_length=1, max_length=255)
     folder_id: int | None = None
     project_id: int | None = None
     notes: str | None = None

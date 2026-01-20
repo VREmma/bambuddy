@@ -58,6 +58,18 @@ All notable changes to Bambuddy will be documented in this file.
   - "Embedded": Shows camera as a floating overlay on the main screen
   - Embedded viewer is draggable and resizable with persistent position/size
   - Configure in Settings → General → Camera section
+- **File Manager Rename** - Rename files and folders directly in File Manager:
+  - Right-click context menu "Rename" option for files and folders
+  - Inline rename button in list view
+  - Validates filenames (no path separators allowed)
+- **File Manager Print Button** - Print directly from multi-selection toolbar:
+  - "Print" button appears when exactly one sliced file is selected
+  - Opens full PrintModal with plate selection and print options
+  - "Add to Queue" button now uses Clock icon for clarity
+- **File Manager Mobile Accessibility** - Improved touch device support:
+  - Three-dot menu button always visible on mobile (hover-only on desktop)
+  - Selection checkbox always visible on mobile devices
+  - Better PWA experience for file management
 
 ### Changed
 - **Edit Queue Item modal** - Single printer selection only (reassigns item, doesn't duplicate)
