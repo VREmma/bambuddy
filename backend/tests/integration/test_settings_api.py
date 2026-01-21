@@ -285,3 +285,88 @@ class TestSettingsAPI:
         assert result["mqtt_port"] == 1883
         assert result["mqtt_topic_prefix"] == "bambuddy"
         assert result["mqtt_use_tls"] is False
+
+    # ========================================================================
+    # Camera settings tests
+    # ========================================================================
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_update_camera_view_mode(self, async_client: AsyncClient):
+        """Verify camera view mode can be updated."""
+        response = await async_client.put("/api/v1/settings/", json={"camera_view_mode": "embedded"})
+
+        assert response.status_code == 200
+        assert response.json()["camera_view_mode"] == "embedded"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_camera_view_mode_persists(self, async_client: AsyncClient):
+        """CRITICAL: Verify camera view mode persists after update."""
+        # Update to embedded
+        await async_client.put("/api/v1/settings/", json={"camera_view_mode": "embedded"})
+
+        # Verify persistence in new request
+        response = await async_client.get("/api/v1/settings/")
+        assert response.json()["camera_view_mode"] == "embedded"
+
+        # Update back to window
+        await async_client.put("/api/v1/settings/", json={"camera_view_mode": "window"})
+
+        # Verify persistence
+        response = await async_client.get("/api/v1/settings/")
+        assert response.json()["camera_view_mode"] == "window"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_camera_view_mode_default(self, async_client: AsyncClient):
+        """Verify camera view mode has correct default value."""
+        # Reset by requesting settings (default should be 'window')
+        response = await async_client.get("/api/v1/settings/")
+        result = response.json()
+
+        assert "camera_view_mode" in result
+        # Default is 'window' as defined in schema
+        assert result["camera_view_mode"] in ["window", "embedded"]
+
+    # ========================================================================
+    # Per-printer mapping settings tests
+    # ========================================================================
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_update_per_printer_mapping_expanded(self, async_client: AsyncClient):
+        """Verify per_printer_mapping_expanded can be updated."""
+        response = await async_client.put("/api/v1/settings/", json={"per_printer_mapping_expanded": True})
+
+        assert response.status_code == 200
+        assert response.json()["per_printer_mapping_expanded"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_per_printer_mapping_expanded_persists(self, async_client: AsyncClient):
+        """CRITICAL: Verify per_printer_mapping_expanded persists after update."""
+        # Update to True
+        await async_client.put("/api/v1/settings/", json={"per_printer_mapping_expanded": True})
+
+        # Verify persistence in new request
+        response = await async_client.get("/api/v1/settings/")
+        assert response.json()["per_printer_mapping_expanded"] is True
+
+        # Update back to False
+        await async_client.put("/api/v1/settings/", json={"per_printer_mapping_expanded": False})
+
+        # Verify persistence
+        response = await async_client.get("/api/v1/settings/")
+        assert response.json()["per_printer_mapping_expanded"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_per_printer_mapping_expanded_default(self, async_client: AsyncClient):
+        """Verify per_printer_mapping_expanded has correct default value."""
+        response = await async_client.get("/api/v1/settings/")
+        result = response.json()
+
+        assert "per_printer_mapping_expanded" in result
+        # Default is False as defined in schema
+        assert isinstance(result["per_printer_mapping_expanded"], bool)

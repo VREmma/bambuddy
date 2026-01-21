@@ -2,6 +2,92 @@
 
 All notable changes to Bambuddy will be documented in this file.
 
+## [0.1.6b10] - 2026-01-21
+
+### New Features
+- **Unified Print Modal** - Consolidated three separate modals into one unified component:
+  - Single modal handles reprint, add-to-queue, and edit-queue-item operations
+  - Consistent UI/UX across all print operations
+  - Reduced code duplication (~1300 LOC removed)
+- **Multi-Printer Selection** - Send prints or queue items to multiple printers at once:
+  - Checkbox selection for multiple printers in reprint and add-to-queue modes
+  - "Select all" / "Clear" buttons for quick selection
+  - Progress indicator during multi-printer submission
+  - Ideal for print farms with identical filament configurations
+- **Per-Printer AMS Mapping** - Configure filament slot mapping individually for each printer:
+  - Enable "Custom mapping" checkbox under each selected printer
+  - Auto-configure uses RFID data to match filaments automatically
+  - Manual override for specific slot assignments
+  - Match status indicator shows exact/partial/missing matches
+  - Re-read button to refresh printer's loaded filaments
+  - New setting in Settings → Filament to expand custom mapping by default
+- **Enhanced Add-to-Queue** - Now includes plate selection and print options:
+  - Configure all print settings upfront instead of editing afterward
+  - Filament mapping with manual override capability
+- **Print from File Manager** - Full print configuration when printing from library files:
+  - Plate selection for multi-plate 3MF files with thumbnails
+  - Filament slot mapping with comparison to loaded filaments
+  - All print options (bed levelling, flow calibration, etc.)
+- **File Manager Print Button** - Print directly from multi-selection toolbar:
+  - "Print" button appears when exactly one sliced file is selected
+  - Opens full PrintModal with plate selection and print options
+  - "Add to Queue" button now uses Clock icon for clarity
+- **Multiple Embedded Camera Viewers** - Open camera streams for multiple printers simultaneously in embedded mode:
+  - Each viewer has its own remembered position and size
+  - New viewers are automatically offset to prevent stacking
+  - Printer-specific persistence in localStorage
+  - **Navigation persistence** - Open cameras stay open when navigating away and back to Printers page
+- **Application Log Viewer** - View and filter application logs in real-time from System Information page:
+  - Start/Stop live streaming with 2-second auto-refresh
+  - Filter by log level (DEBUG, INFO, WARNING, ERROR)
+  - Text search across messages and logger names
+  - Clear logs with one click
+  - Expandable multi-line log entries (stack traces, etc.)
+  - Auto-scroll to follow new entries
+- **Deferred archive creation** - Queue items from File Manager no longer create archives upfront:
+  - Queue items store `library_file_id` directly
+  - Archives are created automatically when prints start
+  - Reduces clutter in Archives from unprinted queued files
+  - Queue displays library file name, thumbnail, and print time
+- **Expandable Color Picker** - Configure AMS Slot modal now has an expandable color palette:
+  - 8 basic colors shown by default (White, Black, Red, Blue, Green, Yellow, Orange, Gray)
+  - Click "+" to expand 24 additional colors (Cyan, Magenta, Purple, Pink, Brown, Beige, Navy, Teal, Lime, Gold, Silver, Maroon, Olive, Coral, Salmon, Turquoise, Violet, Indigo, Chocolate, Tan, Slate, Charcoal, Ivory, Cream)
+  - Click "-" to collapse back to basic colors
+- **File Manager Sorting** - Printer file manager now has sorting options:
+  - Sort by name (A-Z or Z-A)
+  - Sort by size (smallest or largest first)
+  - Sort by date (oldest or newest first)
+  - Directories always sorted first
+- **Camera View Mode Setting** - Choose how camera streams open:
+  - "New Window" (default): Opens camera in a separate browser window
+  - "Embedded": Shows camera as a floating overlay on the main screen
+  - Embedded viewer is draggable and resizable with persistent position/size
+  - Configure in Settings → General → Camera section
+- **File Manager Rename** - Rename files and folders directly in File Manager:
+  - Right-click context menu "Rename" option for files and folders
+  - Inline rename button in list view
+  - Validates filenames (no path separators allowed)
+- **File Manager Mobile Accessibility** - Improved touch device support:
+  - Three-dot menu button always visible on mobile (hover-only on desktop)
+  - Selection checkbox always visible on mobile devices
+  - Better PWA experience for file management
+
+### Changed
+- **Edit Queue Item modal** - Single printer selection only (reassigns item, doesn't duplicate)
+- **Edit Queue Item button** - Changed from "Print to X Printers" to "Save"
+
+### Fixed
+- **File Manager folder navigation** - Fixed bug where opening a folder would briefly show files then jump back to root:
+  - Removed `selectedFolderId` from useEffect dependency array that was causing a reset loop
+  - Folder navigation now works correctly without resetting
+- **Queue items with library files** - Fixed 500 errors when listing/updating queue items from File Manager
+- **User preset AMS configuration** - Fixed user presets (inheriting from Bambu presets) showing empty fields in Bambu Studio after configuration:
+  - Now correctly derives `tray_info_idx` from the preset's `base_id` when `filament_id` is null
+  - User presets that inherit from Bambu presets (e.g., "# Overture Matte PLA @BBL H2D") now work correctly
+- **Faster AMS slot updates** - Frontend now updates immediately after configuring AMS slots:
+  - Added WebSocket broadcast to AMS change callback for instant UI updates
+  - Removed unnecessary delayed refetch that was causing slow updates
+
 ## [0.1.6b9] - 2026-01-19
 
 ### New Features

@@ -58,12 +58,14 @@ import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { FileManagerModal } from '../components/FileManagerModal';
+import { EmbeddedCameraViewer } from '../components/EmbeddedCameraViewer';
 import { MQTTDebugModal } from '../components/MQTTDebugModal';
 import { HMSErrorModal, filterKnownHMSErrors } from '../components/HMSErrorModal';
 import { PrinterQueueWidget } from '../components/PrinterQueueWidget';
 import { AMSHistoryModal } from '../components/AMSHistoryModal';
 import { FilamentHoverCard, EmptySlotHoverCard } from '../components/FilamentHoverCard';
 import { LinkSpoolModal } from '../components/LinkSpoolModal';
+import { ConfigureAmsSlotModal } from '../components/ConfigureAmsSlotModal';
 import { useToast } from '../contexts/ToastContext';
 import { ChamberLight } from '../components/icons/ChamberLight';
 
@@ -378,6 +380,10 @@ function hexToBasicColorName(hex: string | null | undefined): string {
   }
 
   // Classify by hue
+  // Brown is orange/yellow hue with lower lightness
+  if (h >= 15 && h < 45 && l < 0.45) return 'Brown';
+  if (h >= 45 && h < 70 && l < 0.40) return 'Brown';
+
   if (h < 15 || h >= 345) return 'Red';
   if (h < 45) return 'Orange';
   if (h < 70) return 'Yellow';
@@ -904,6 +910,8 @@ function PrinterCard({
   spoolmanEnabled = false,
   hasUnlinkedSpools = false,
   timeFormat = 'system',
+  cameraViewMode = 'window',
+  onOpenEmbeddedCamera,
 }: {
   printer: Printer;
   hideIfDisconnected?: boolean;
@@ -919,6 +927,8 @@ function PrinterCard({
   spoolmanEnabled?: boolean;
   hasUnlinkedSpools?: boolean;
   timeFormat?: 'system' | '12h' | '24h';
+  cameraViewMode?: 'window' | 'embedded';
+  onOpenEmbeddedCamera?: (printerId: number, printerName: string) => void;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -944,6 +954,15 @@ function PrinterCard({
   const [linkSpoolModal, setLinkSpoolModal] = useState<{
     trayUuid: string;
     trayInfo: { type: string; color: string; location: string };
+  } | null>(null);
+  const [configureSlotModal, setConfigureSlotModal] = useState<{
+    amsId: number;
+    trayId: number;
+    trayCount: number;
+    trayType?: string;
+    trayColor?: string;
+    traySubBrands?: string;
+    trayInfoIdx?: string;
   } | null>(null);
   const [showFirmwareModal, setShowFirmwareModal] = useState(false);
 
@@ -985,6 +1004,13 @@ function PrinterCard({
     queryFn: () => api.getFilamentInfo(trayInfoIds),
     enabled: trayInfoIds.length > 0,
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+
+  // Fetch slot preset mappings (stores preset name for user-configured slots)
+  const { data: slotPresets } = useQuery({
+    queryKey: ['slotPresets', printer.id],
+    queryFn: () => api.getSlotPresets(printer.id),
+    staleTime: 2 * 60 * 1000, // 2 minutes
   });
 
   // Cache WiFi signal to prevent it disappearing on updates
@@ -1712,45 +1738,54 @@ function PrinterCard({
               const nozzleHeating = status.temperatures.nozzle_heating || status.temperatures.nozzle_2_heating || false;
               const bedHeating = status.temperatures.bed_heating || false;
               const chamberHeating = status.temperatures.chamber_heating || false;
+              const isDualNozzle = printer.nozzle_count === 2 || status.temperatures.nozzle_2 !== undefined;
+              // active_extruder: 0=right, 1=left
+              const activeNozzle = status.active_extruder === 1 ? 'L' : 'R';
 
               return (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="flex items-center gap-1.5">
                   {/* Nozzle temp - combined for dual nozzle */}
-                  <div className="text-center p-2 bg-bambu-dark rounded-lg">
-                    <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-orange-400" isHeating={nozzleHeating} />
+                  <div className="text-center px-2 py-1.5 bg-bambu-dark rounded-lg flex-1">
+                    <HeaterThermometer className="w-3.5 h-3.5 mx-auto mb-0.5" color="text-orange-400" isHeating={nozzleHeating} />
                     {status.temperatures.nozzle_2 !== undefined ? (
                       <>
-                        <p className="text-[10px] text-bambu-gray">L / R</p>
-                        <p className="text-xs text-white">
+                        <p className="text-[9px] text-bambu-gray">L / R</p>
+                        <p className="text-[11px] text-white">
                           {Math.round(status.temperatures.nozzle || 0)}° / {Math.round(status.temperatures.nozzle_2 || 0)}°
                         </p>
                       </>
                     ) : (
                       <>
-                        <p className="text-[10px] text-bambu-gray">Nozzle</p>
-                        <p className="text-xs text-white">
+                        <p className="text-[9px] text-bambu-gray">Nozzle</p>
+                        <p className="text-[11px] text-white">
                           {Math.round(status.temperatures.nozzle || 0)}°C
                         </p>
                       </>
                     )}
                   </div>
-                  <div className="text-center p-2 bg-bambu-dark rounded-lg">
-                    <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-blue-400" isHeating={bedHeating} />
-                    <p className="text-[10px] text-bambu-gray">Bed</p>
-                    <p className="text-xs text-white">
+                  <div className="text-center px-2 py-1.5 bg-bambu-dark rounded-lg flex-1">
+                    <HeaterThermometer className="w-3.5 h-3.5 mx-auto mb-0.5" color="text-blue-400" isHeating={bedHeating} />
+                    <p className="text-[9px] text-bambu-gray">Bed</p>
+                    <p className="text-[11px] text-white">
                       {Math.round(status.temperatures.bed || 0)}°C
                     </p>
                   </div>
-                  {status.temperatures.chamber !== undefined ? (
-                    <div className="text-center p-2 bg-bambu-dark rounded-lg">
-                      <HeaterThermometer className="w-4 h-4 mx-auto mb-1" color="text-green-400" isHeating={chamberHeating} />
-                      <p className="text-[10px] text-bambu-gray">Chamber</p>
-                      <p className="text-xs text-white">
+                  {status.temperatures.chamber !== undefined && (
+                    <div className="text-center px-2 py-1.5 bg-bambu-dark rounded-lg flex-1">
+                      <HeaterThermometer className="w-3.5 h-3.5 mx-auto mb-0.5" color="text-green-400" isHeating={chamberHeating} />
+                      <p className="text-[9px] text-bambu-gray">Chamber</p>
+                      <p className="text-[11px] text-white">
                         {Math.round(status.temperatures.chamber || 0)}°C
                       </p>
                     </div>
-                  ) : (
-                    <div /> /* Empty placeholder to maintain grid */
+                  )}
+                  {/* Active nozzle indicator for dual-nozzle printers */}
+                  {isDualNozzle && (
+                    <div className="text-center px-2 py-1.5 bg-bambu-dark rounded-lg" title={`Active: ${activeNozzle === 'L' ? 'Left' : 'Right'} nozzle`}>
+                      <p className={`text-[11px] font-bold ${activeNozzle === 'L' ? 'text-amber-400' : 'text-gray-500'}`}>L</p>
+                      <p className="text-[9px] text-bambu-gray">Nozzle</p>
+                      <p className={`text-[11px] font-bold ${activeNozzle === 'R' ? 'text-amber-400' : 'text-gray-500'}`}>R</p>
+                    </div>
                   )}
                 </div>
               );
@@ -1947,11 +1982,13 @@ function PrinterCard({
                                 const isActive = effectiveTrayNow === globalTrayId;
                                 // Get cloud preset info if available
                                 const cloudInfo = tray?.tray_info_idx ? filamentInfo?.[tray.tray_info_idx] : null;
+                                // Get saved slot preset mapping (for user-configured slots)
+                                const slotPreset = slotPresets?.[globalTrayId];
 
                                 // Build filament data for hover card
                                 const filamentData = tray?.tray_type ? {
                                   vendor: (isBambuLabSpool(tray) ? 'Bambu Lab' : 'Generic') as 'Bambu Lab' | 'Generic',
-                                  profile: cloudInfo?.name || tray.tray_sub_brands || tray.tray_type,
+                                  profile: cloudInfo?.name || slotPreset?.preset_name || tray.tray_sub_brands || tray.tray_type,
                                   colorName: getBambuColorName(tray.tray_id_name) || hexToBasicColorName(tray.tray_color),
                                   colorHex: tray.tray_color || null,
                                   kFactor: formatKValue(tray.k),
@@ -2057,11 +2094,32 @@ function PrinterCard({
                                             });
                                           } : undefined,
                                         }}
+                                        configureSlot={{
+                                          enabled: true,
+                                          onConfigure: () => setConfigureSlotModal({
+                                            amsId: ams.id,
+                                            trayId: slotIdx,
+                                            trayCount: ams.tray.length,
+                                            trayType: tray?.tray_type || undefined,
+                                            trayColor: tray?.tray_color || undefined,
+                                            traySubBrands: tray?.tray_sub_brands || undefined,
+                                            trayInfoIdx: tray?.tray_info_idx || undefined,
+                                          }),
+                                        }}
                                       >
                                         {slotVisual}
                                       </FilamentHoverCard>
                                     ) : (
-                                      <EmptySlotHoverCard>
+                                      <EmptySlotHoverCard
+                                        configureSlot={{
+                                          enabled: true,
+                                          onConfigure: () => setConfigureSlotModal({
+                                            amsId: ams.id,
+                                            trayId: slotIdx,
+                                            trayCount: ams.tray.length,
+                                          }),
+                                        }}
+                                      >
                                         {slotVisual}
                                       </EmptySlotHoverCard>
                                     )}
@@ -2094,11 +2152,13 @@ function PrinterCard({
                         const isActive = effectiveTrayNow === globalTrayId;
                         // Get cloud preset info if available
                         const cloudInfo = tray?.tray_info_idx ? filamentInfo?.[tray.tray_info_idx] : null;
+                        // Get saved slot preset mapping (for user-configured slots)
+                        const slotPreset = slotPresets?.[globalTrayId];
 
                         // Build filament data for hover card
                         const filamentData = tray?.tray_type ? {
                           vendor: (isBambuLabSpool(tray) ? 'Bambu Lab' : 'Generic') as 'Bambu Lab' | 'Generic',
-                          profile: cloudInfo?.name || tray.tray_sub_brands || tray.tray_type,
+                          profile: cloudInfo?.name || slotPreset?.preset_name || tray.tray_sub_brands || tray.tray_type,
                           colorName: getBambuColorName(tray.tray_id_name) || hexToBasicColorName(tray.tray_color),
                           colorHex: tray.tray_color || null,
                           kFactor: formatKValue(tray.k),
@@ -2217,11 +2277,32 @@ function PrinterCard({
                                         });
                                       } : undefined,
                                     }}
+                                    configureSlot={{
+                                      enabled: true,
+                                      onConfigure: () => setConfigureSlotModal({
+                                        amsId: ams.id,
+                                        trayId: htSlotId,
+                                        trayCount: ams.tray.length,
+                                        trayType: tray?.tray_type || undefined,
+                                        trayColor: tray?.tray_color || undefined,
+                                        traySubBrands: tray?.tray_sub_brands || undefined,
+                                        trayInfoIdx: tray?.tray_info_idx || undefined,
+                                      }),
+                                    }}
                                   >
                                     {slotVisual}
                                   </FilamentHoverCard>
                                 ) : (
-                                  <EmptySlotHoverCard>
+                                  <EmptySlotHoverCard
+                                    configureSlot={{
+                                      enabled: true,
+                                      onConfigure: () => setConfigureSlotModal({
+                                        amsId: ams.id,
+                                        trayId: htSlotId,
+                                        trayCount: ams.tray.length,
+                                      }),
+                                    }}
+                                  >
                                     {slotVisual}
                                   </EmptySlotHoverCard>
                                 )}
@@ -2268,11 +2349,13 @@ function PrinterCard({
                         const isExtActive = effectiveTrayNow === 254;
                         // Get cloud preset info if available
                         const extCloudInfo = extTray.tray_info_idx ? filamentInfo?.[extTray.tray_info_idx] : null;
+                        // Get saved slot preset mapping (external spool uses amsId=255, trayId=0)
+                        const extSlotPreset = slotPresets?.[255 * 4 + 0];
 
                         // Build filament data for hover card
                         const extFilamentData = {
                           vendor: (isBambuLabSpool(extTray) ? 'Bambu Lab' : 'Generic') as 'Bambu Lab' | 'Generic',
-                          profile: extCloudInfo?.name || extTray.tray_sub_brands || extTray.tray_type || 'Unknown',
+                          profile: extCloudInfo?.name || extSlotPreset?.preset_name || extTray.tray_sub_brands || extTray.tray_type || 'Unknown',
                           colorName: getBambuColorName(extTray.tray_id_name) || hexToBasicColorName(extTray.tray_color),
                           colorHex: extTray.tray_color || null,
                           kFactor: formatKValue(extTray.k),
@@ -2321,6 +2404,18 @@ function PrinterCard({
                                     },
                                   });
                                 } : undefined,
+                              }}
+                              configureSlot={{
+                                enabled: true,
+                                onConfigure: () => setConfigureSlotModal({
+                                  amsId: 255, // External spool indicator
+                                  trayId: 0,
+                                  trayCount: 1, // External = single slot
+                                  trayType: extTray.tray_type || undefined,
+                                  trayColor: extTray.tray_color || undefined,
+                                  traySubBrands: extTray.tray_sub_brands || undefined,
+                                  trayInfoIdx: extTray.tray_info_idx || undefined,
+                                }),
                               }}
                             >
                               {extSlotContent}
@@ -2444,20 +2539,24 @@ function PrinterCard({
                 variant="secondary"
                 size="sm"
                 onClick={() => {
-                  // Use saved window state or defaults
-                  const saved = localStorage.getItem('cameraWindowState');
-                  const state = saved ? JSON.parse(saved) : { width: 640, height: 400 };
-                  const features = [
-                    `width=${state.width}`,
-                    `height=${state.height}`,
-                    state.left !== undefined ? `left=${state.left}` : '',
-                    state.top !== undefined ? `top=${state.top}` : '',
-                    'menubar=no,toolbar=no,location=no,status=no,noopener',
-                  ].filter(Boolean).join(',');
-                  window.open(`/camera/${printer.id}`, `camera-${printer.id}`, features);
+                  if (cameraViewMode === 'embedded' && onOpenEmbeddedCamera) {
+                    onOpenEmbeddedCamera(printer.id, printer.name);
+                  } else {
+                    // Use saved window state or defaults
+                    const saved = localStorage.getItem('cameraWindowState');
+                    const state = saved ? JSON.parse(saved) : { width: 640, height: 400 };
+                    const features = [
+                      `width=${state.width}`,
+                      `height=${state.height}`,
+                      state.left !== undefined ? `left=${state.left}` : '',
+                      state.top !== undefined ? `top=${state.top}` : '',
+                      'menubar=no,toolbar=no,location=no,status=no,noopener',
+                    ].filter(Boolean).join(',');
+                    window.open(`/camera/${printer.id}`, `camera-${printer.id}`, features);
+                  }
                 }}
                 disabled={!status?.connected}
-                title="Open camera in new window"
+                title={cameraViewMode === 'embedded' ? 'Open camera overlay' : 'Open camera in new window'}
               >
                 <Video className="w-4 h-4" />
               </Button>
@@ -2818,6 +2917,22 @@ function PrinterCard({
           onClose={() => setLinkSpoolModal(null)}
           trayUuid={linkSpoolModal.trayUuid}
           trayInfo={linkSpoolModal.trayInfo}
+        />
+      )}
+
+      {/* Configure AMS Slot Modal */}
+      {configureSlotModal && (
+        <ConfigureAmsSlotModal
+          isOpen={!!configureSlotModal}
+          onClose={() => setConfigureSlotModal(null)}
+          printerId={printer.id}
+          slotInfo={configureSlotModal}
+          onSuccess={() => {
+            // Refresh slot presets to show updated profile name
+            queryClient.invalidateQueries({ queryKey: ['slotPresets', printer.id] });
+            // Printer status will update automatically via WebSocket when AMS data changes
+            queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
+          }}
         />
       )}
 
@@ -3687,6 +3802,31 @@ export function PrintersPage() {
   // Derive viewMode from cardSize: S=compact, M/L/XL=expanded
   const viewMode: ViewMode = cardSize === 1 ? 'compact' : 'expanded';
   const queryClient = useQueryClient();
+  // Embedded camera viewer state - supports multiple simultaneous viewers
+  // Persisted to localStorage so cameras reopen after navigation
+  const [embeddedCameraPrinters, setEmbeddedCameraPrinters] = useState<Map<number, { id: number; name: string }>>(() => {
+    // Initialize from localStorage if camera_view_mode is embedded
+    const saved = localStorage.getItem('openEmbeddedCameras');
+    if (saved) {
+      try {
+        const cameras = JSON.parse(saved) as Array<{ id: number; name: string }>;
+        return new Map(cameras.map(c => [c.id, c]));
+      } catch {
+        return new Map();
+      }
+    }
+    return new Map();
+  });
+
+  // Persist open cameras to localStorage when they change
+  useEffect(() => {
+    const cameras = Array.from(embeddedCameraPrinters.values());
+    if (cameras.length > 0) {
+      localStorage.setItem('openEmbeddedCameras', JSON.stringify(cameras));
+    } else {
+      localStorage.removeItem('openEmbeddedCameras');
+    }
+  }, [embeddedCameraPrinters]);
 
   const { data: printers, isLoading } = useQuery({
     queryKey: ['printers'],
@@ -3698,6 +3838,13 @@ export function PrintersPage() {
     queryKey: ['settings'],
     queryFn: api.getSettings,
   });
+
+  // Close embedded cameras if mode changes to 'window'
+  useEffect(() => {
+    if (settings?.camera_view_mode === 'window' && embeddedCameraPrinters.size > 0) {
+      setEmbeddedCameraPrinters(new Map());
+    }
+  }, [settings?.camera_view_mode, embeddedCameraPrinters.size]);
 
   // Fetch all smart plugs to know which printers have them
   const { data: smartPlugs } = useQuery({
@@ -4027,6 +4174,8 @@ export function PrintersPage() {
                     spoolmanEnabled={spoolmanEnabled}
                     hasUnlinkedSpools={hasUnlinkedSpools}
                     timeFormat={settings?.time_format || 'system'}
+                    cameraViewMode={settings?.camera_view_mode || 'window'}
+                    onOpenEmbeddedCamera={(id, name) => setEmbeddedCameraPrinters(prev => new Map(prev).set(id, { id, name }))}
                   />
                 ))}
               </div>
@@ -4053,6 +4202,8 @@ export function PrintersPage() {
                 tempFair: Number(settings.ams_temp_fair) || 35,
               } : undefined}
               timeFormat={settings?.time_format || 'system'}
+              cameraViewMode={settings?.camera_view_mode || 'window'}
+              onOpenEmbeddedCamera={(id, name) => setEmbeddedCameraPrinters(prev => new Map(prev).set(id, { id, name }))}
             />
           ))}
         </div>
@@ -4065,6 +4216,21 @@ export function PrintersPage() {
           existingSerials={printers?.map(p => p.serial_number) || []}
         />
       )}
+
+      {/* Embedded Camera Viewers - multiple viewers can be open simultaneously */}
+      {Array.from(embeddedCameraPrinters.values()).map((camera, index) => (
+        <EmbeddedCameraViewer
+          key={camera.id}
+          printerId={camera.id}
+          printerName={camera.name}
+          viewerIndex={index}
+          onClose={() => setEmbeddedCameraPrinters(prev => {
+            const next = new Map(prev);
+            next.delete(camera.id);
+            return next;
+          })}
+        />
+      ))}
     </div>
   );
 }

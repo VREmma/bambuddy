@@ -34,6 +34,8 @@ import {
   Archive as ArchiveIcon,
   Briefcase,
   Printer,
+  Pencil,
+  Play,
 } from 'lucide-react';
 import { api } from '../api/client';
 import type {
@@ -46,6 +48,7 @@ import type {
 } from '../api/client';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { PrintModal } from '../components/PrintModal';
 import { useToast } from '../contexts/ToastContext';
 
 type SortField = 'name' | 'date' | 'size' | 'type' | 'prints';
@@ -111,6 +114,59 @@ function NewFolderModal({ parentId, onClose, onSave, isLoading }: NewFolderModal
             </Button>
             <Button type="submit" disabled={!name.trim() || isLoading}>
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Rename Modal
+interface RenameModalProps {
+  type: 'file' | 'folder';
+  currentName: string;
+  onClose: () => void;
+  onSave: (newName: string) => void;
+  isLoading: boolean;
+}
+
+function RenameModal({ type, currentName, onClose, onSave, isLoading }: RenameModalProps) {
+  const [name, setName] = useState(currentName);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (name.trim() && name.trim() !== currentName) {
+      onSave(name.trim());
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-bambu-dark-secondary rounded-lg w-full max-w-sm border border-bambu-dark-tertiary">
+        <div className="p-4 border-b border-bambu-dark-tertiary">
+          <h2 className="text-lg font-semibold text-white">Rename {type === 'file' ? 'File' : 'Folder'}</h2>
+        </div>
+        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-white mb-1">
+              Name
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full bg-bambu-dark border border-bambu-dark-tertiary rounded px-3 py-2 text-white placeholder-bambu-gray focus:outline-none focus:border-bambu-green"
+              autoFocus
+              required
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!name.trim() || name.trim() === currentName || isLoading}>
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Rename'}
             </Button>
           </div>
         </form>
@@ -567,10 +623,11 @@ interface FolderTreeItemProps {
   onSelect: (id: number | null) => void;
   onDelete: (id: number) => void;
   onLink: (folder: LibraryFolderTree) => void;
+  onRename: (folder: LibraryFolderTree) => void;
   depth?: number;
 }
 
-function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, depth = 0 }: FolderTreeItemProps) {
+function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, onRename, depth = 0 }: FolderTreeItemProps) {
   const [expanded, setExpanded] = useState(true);
   const [showActions, setShowActions] = useState(false);
   const hasChildren = folder.children.length > 0;
@@ -644,6 +701,13 @@ function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, 
                 <div className="absolute right-0 top-full mt-1 z-20 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl py-1 min-w-[120px]">
                 <button
                   className="w-full px-3 py-1.5 text-left text-sm text-white hover:bg-bambu-dark flex items-center gap-2"
+                  onClick={() => { onRename(folder); setShowActions(false); }}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Rename
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm text-white hover:bg-bambu-dark flex items-center gap-2"
                   onClick={() => { onLink(folder); setShowActions(false); }}
                 >
                   <Link2 className="w-3.5 h-3.5" />
@@ -672,6 +736,7 @@ function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, 
               onSelect={onSelect}
               onDelete={onDelete}
               onLink={onLink}
+              onRename={onRename}
               depth={depth + 1}
             />
           ))}
@@ -695,9 +760,11 @@ interface FileCardProps {
   onDelete: (id: number) => void;
   onDownload: (id: number) => void;
   onAddToQueue?: (id: number) => void;
+  onPrint?: (file: LibraryFileListItem) => void;
+  onRename?: (file: LibraryFileListItem) => void;
 }
 
-function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onAddToQueue }: FileCardProps) {
+function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onAddToQueue, onPrint, onRename }: FileCardProps) {
   const [showActions, setShowActions] = useState(false);
 
   return (
@@ -759,8 +826,8 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onAddToQue
         )}
       </div>
 
-      {/* Actions */}
-      <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+      {/* Actions - always visible on mobile, hover on desktop */}
+      <div className="absolute bottom-2 right-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
         <button
           onClick={() => setShowActions(!showActions)}
           className="p-1.5 rounded bg-bambu-dark-secondary/90 hover:bg-bambu-dark-tertiary"
@@ -771,12 +838,21 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onAddToQue
           <>
             <div className="fixed inset-0 z-10" onClick={() => setShowActions(false)} />
             <div className="absolute right-0 bottom-8 z-20 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl py-1 min-w-[140px]">
-              {onAddToQueue && isSlicedFilename(file.filename) && (
+              {onPrint && isSlicedFilename(file.filename) && (
                 <button
                   className="w-full px-3 py-1.5 text-left text-sm text-bambu-green hover:bg-bambu-dark flex items-center gap-2"
-                  onClick={() => { onAddToQueue(file.id); setShowActions(false); }}
+                  onClick={() => { onPrint(file); setShowActions(false); }}
                 >
                   <Printer className="w-3.5 h-3.5" />
+                  Print
+                </button>
+              )}
+              {onAddToQueue && isSlicedFilename(file.filename) && (
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm text-white hover:bg-bambu-dark flex items-center gap-2"
+                  onClick={() => { onAddToQueue(file.id); setShowActions(false); }}
+                >
+                  <Clock className="w-3.5 h-3.5" />
                   Add to Queue
                 </button>
               )}
@@ -787,6 +863,15 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onAddToQue
                 <Download className="w-3.5 h-3.5" />
                 Download
               </button>
+              {onRename && (
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm text-white hover:bg-bambu-dark flex items-center gap-2"
+                  onClick={() => { onRename(file); setShowActions(false); }}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Rename
+                </button>
+              )}
               <button
                 className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-bambu-dark flex items-center gap-2"
                 onClick={() => { onDelete(file.id); setShowActions(false); }}
@@ -799,11 +884,11 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onAddToQue
         )}
       </div>
 
-      {/* Selection checkbox */}
+      {/* Selection checkbox - always visible on mobile, hover on desktop */}
       <div className={`absolute top-2 left-2 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
         isSelected
           ? 'bg-bambu-green border-bambu-green'
-          : 'border-white/30 bg-black/30 opacity-0 group-hover:opacity-100'
+          : 'border-white/30 bg-black/30 opacity-100 md:opacity-0 md:group-hover:opacity-100'
       }`}>
         {isSelected && <div className="w-2 h-2 bg-white rounded-sm" />}
       </div>
@@ -828,6 +913,9 @@ export function FileManagerPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [linkFolder, setLinkFolder] = useState<LibraryFolderTree | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'file' | 'folder' | 'bulk'; id: number; count?: number } | null>(null);
+  const [printFile, setPrintFile] = useState<LibraryFileListItem | null>(null);
+  const [printMultiFile, setPrintMultiFile] = useState<LibraryFileListItem | null>(null);
+  const [renameItem, setRenameItem] = useState<{ type: 'file' | 'folder'; id: number; name: string } | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
     return (localStorage.getItem('library-view-mode') as 'grid' | 'list') || 'grid';
   });
@@ -841,8 +929,8 @@ export function FileManagerPage() {
   // Update selectedFolderId when URL parameter changes (e.g., navigating from Project or Archive page)
   useEffect(() => {
     const folderParam = searchParams.get('folder');
-    const newFolderId = folderParam ? parseInt(folderParam, 10) : null;
-    if (newFolderId !== selectedFolderId) {
+    if (folderParam) {
+      const newFolderId = parseInt(folderParam, 10);
       setSelectedFolderId(newFolderId);
     }
   }, [searchParams]);
@@ -1006,6 +1094,7 @@ export function FileManagerPage() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['archives'] }); // Archives are created when adding to queue
       setSelectedFiles([]);
 
       if (result.added.length > 0 && result.errors.length === 0) {
@@ -1023,6 +1112,36 @@ export function FileManagerPage() {
       }
     },
     onError: (error: Error) => showToast(error.message, 'error'),
+  });
+
+  const renameFileMutation = useMutation({
+    mutationFn: ({ id, filename }: { id: number; filename: string }) =>
+      api.updateLibraryFile(id, { filename }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['library-files'] });
+      setRenameItem(null);
+      showToast('File renamed', 'success');
+    },
+    onError: (error: Error) => {
+      setRenameItem(null);
+      showToast(error.message, 'error');
+    },
+  });
+
+  const renameFolderMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      api.updateLibraryFolder(id, { name }),
+    onSuccess: () => {
+      // Invalidate both folders and files - files may display folder info
+      queryClient.invalidateQueries({ queryKey: ['library-folders'] });
+      queryClient.invalidateQueries({ queryKey: ['library-files'] });
+      setRenameItem(null);
+      showToast('Folder renamed', 'success');
+    },
+    onError: (error: Error) => {
+      setRenameItem(null);
+      showToast(error.message, 'error');
+    },
   });
 
   // Helper to check if a file is sliced (printable)
@@ -1213,6 +1332,7 @@ export function FileManagerPage() {
                 onSelect={setSelectedFolderId}
                 onDelete={(id) => setDeleteConfirm({ type: 'folder', id })}
                 onLink={setLinkFolder}
+                onRename={(f) => setRenameItem({ type: 'folder', id: f.id, name: f.name })}
               />
             ))}
           </div>
@@ -1317,14 +1437,24 @@ export function FileManagerPage() {
                     {selectedFiles.length} selected
                   </span>
                   <div className="flex-1" />
-                  {selectedSlicedFiles.length > 0 && (
+                  {selectedSlicedFiles.length === 1 && (
                     <Button
                       variant="primary"
+                      size="sm"
+                      onClick={() => setPrintMultiFile(selectedSlicedFiles[0])}
+                    >
+                      <Play className="w-4 h-4 mr-1" />
+                      Print
+                    </Button>
+                  )}
+                  {selectedSlicedFiles.length > 0 && (
+                    <Button
+                      variant={selectedSlicedFiles.length === 1 ? 'secondary' : 'primary'}
                       size="sm"
                       onClick={() => addToQueueMutation.mutate(selectedSlicedFiles.map(f => f.id))}
                       disabled={addToQueueMutation.isPending}
                     >
-                      <Printer className="w-4 h-4 mr-1" />
+                      <Clock className="w-4 h-4 mr-1" />
                       {addToQueueMutation.isPending ? 'Adding...' : `Add to Queue${selectedSlicedFiles.length < selectedFiles.length ? ` (${selectedSlicedFiles.length})` : ''}`}
                     </Button>
                   )}
@@ -1413,6 +1543,8 @@ export function FileManagerPage() {
                     onDelete={(id) => setDeleteConfirm({ type: 'file', id })}
                     onDownload={handleDownload}
                     onAddToQueue={(id) => addToQueueMutation.mutate([id])}
+                    onPrint={setPrintFile}
+                    onRename={(f) => setRenameItem({ type: 'file', id: f.id, name: f.filename })}
                   />
                 ))}
               </div>
@@ -1503,14 +1635,23 @@ export function FileManagerPage() {
                     {/* Actions */}
                     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       {isSlicedFilename(file.filename) && (
-                        <button
-                          onClick={() => addToQueueMutation.mutate([file.id])}
-                          className="p-1.5 rounded hover:bg-bambu-dark text-bambu-gray hover:text-bambu-green transition-colors"
-                          title="Add to Queue"
-                          disabled={addToQueueMutation.isPending}
-                        >
-                          <Printer className="w-4 h-4" />
-                        </button>
+                        <>
+                          <button
+                            onClick={() => setPrintFile(file)}
+                            className="p-1.5 rounded hover:bg-bambu-dark text-bambu-gray hover:text-bambu-green transition-colors"
+                            title="Print"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => addToQueueMutation.mutate([file.id])}
+                            className="p-1.5 rounded hover:bg-bambu-dark text-bambu-gray hover:text-white transition-colors"
+                            title="Add to Queue"
+                            disabled={addToQueueMutation.isPending}
+                          >
+                            <Clock className="w-4 h-4" />
+                          </button>
+                        </>
                       )}
                       <button
                         onClick={() => handleDownload(file.id)}
@@ -1518,6 +1659,13 @@ export function FileManagerPage() {
                         title="Download"
                       >
                         <Download className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setRenameItem({ type: 'file', id: file.id, name: file.filename })}
+                        className="p-1.5 rounded hover:bg-bambu-dark text-bambu-gray hover:text-white transition-colors"
+                        title="Rename"
+                      >
+                        <Pencil className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => setDeleteConfirm({ type: 'file', id: file.id })}
@@ -1593,6 +1741,51 @@ export function FileManagerPage() {
           variant="danger"
           onConfirm={handleDeleteConfirm}
           onCancel={() => setDeleteConfirm(null)}
+        />
+      )}
+
+      {printFile && (
+        <PrintModal
+          mode="reprint"
+          libraryFileId={printFile.id}
+          archiveName={printFile.print_name || printFile.filename}
+          onClose={() => setPrintFile(null)}
+          onSuccess={() => {
+            setPrintFile(null);
+            queryClient.invalidateQueries({ queryKey: ['library-files'] });
+            queryClient.invalidateQueries({ queryKey: ['archives'] });
+          }}
+        />
+      )}
+
+      {printMultiFile && (
+        <PrintModal
+          mode="reprint"
+          libraryFileId={printMultiFile.id}
+          archiveName={printMultiFile.print_name || printMultiFile.filename}
+          onClose={() => setPrintMultiFile(null)}
+          onSuccess={() => {
+            setPrintMultiFile(null);
+            setSelectedFiles([]);
+            queryClient.invalidateQueries({ queryKey: ['library-files'] });
+            queryClient.invalidateQueries({ queryKey: ['archives'] });
+          }}
+        />
+      )}
+
+      {renameItem && (
+        <RenameModal
+          type={renameItem.type}
+          currentName={renameItem.name}
+          onClose={() => setRenameItem(null)}
+          onSave={(newName) => {
+            if (renameItem.type === 'file') {
+              renameFileMutation.mutate({ id: renameItem.id, filename: newName });
+            } else {
+              renameFolderMutation.mutate({ id: renameItem.id, name: newName });
+            }
+          }}
+          isLoading={renameFileMutation.isPending || renameFolderMutation.isPending}
         />
       )}
     </div>

@@ -6,6 +6,7 @@ async function request<T>(
 ): Promise<T> {
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
+    cache: 'no-store', // Prevent browser caching of API responses
     headers: {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -558,6 +559,8 @@ export interface AppSettings {
   ams_temp_good: number;      // <= this is green/blue
   ams_temp_fair: number;      // <= this is orange, > is red
   ams_history_retention_days: number;  // days to keep AMS sensor history
+  // Print modal settings
+  per_printer_mapping_expanded: boolean;  // Whether custom mapping is expanded by default in print modal
   // Date/time format settings
   date_format: 'system' | 'us' | 'eu' | 'iso';
   time_format: 'system' | '12h' | '24h';
@@ -593,6 +596,8 @@ export interface AppSettings {
   // File Manager / Library settings
   library_archive_mode: 'always' | 'never' | 'ask';
   library_disk_warning_gb: number;
+  // Camera view settings
+  camera_view_mode: 'window' | 'embedded';
 }
 
 export type AppSettingsUpdate = Partial<AppSettings>;
@@ -843,7 +848,9 @@ export interface DiscoveredTasmotaDevice {
 export interface PrintQueueItem {
   id: number;
   printer_id: number | null;  // null = unassigned
-  archive_id: number;
+  // Either archive_id OR library_file_id must be set (archive created at print start)
+  archive_id: number | null;
+  library_file_id: number | null;
   position: number;
   scheduled_time: string | null;
   require_previous_success: boolean;
@@ -865,13 +872,17 @@ export interface PrintQueueItem {
   created_at: string;
   archive_name?: string | null;
   archive_thumbnail?: string | null;
+  library_file_name?: string | null;
+  library_file_thumbnail?: string | null;
   printer_name?: string | null;
-  print_time_seconds?: number | null;  // Estimated print time from archive
+  print_time_seconds?: number | null;  // Estimated print time from archive or library file
 }
 
 export interface PrintQueueItemCreate {
   printer_id?: number | null;  // null = unassigned
-  archive_id: number;
+  // Either archive_id OR library_file_id must be provided
+  archive_id?: number | null;
+  library_file_id?: number | null;
   scheduled_time?: string | null;
   require_previous_success?: boolean;
   auto_off_after?: boolean;
@@ -1470,6 +1481,7 @@ export const api = {
         is_directory: boolean;
         size: number;
         path: string;
+        mtime?: string;
       }>;
     }>(`/printers/${printerId}/files?path=${encodeURIComponent(path)}`),
   getPrinterFileDownloadUrl: (printerId: number, path: string) =>
@@ -1814,6 +1826,7 @@ export const api = {
       plates: Array<{
         index: number;
         name: string | null;
+        objects: string[];
         has_thumbnail: boolean;
         thumbnail_url: string | null;
         print_time_seconds: number | null;
@@ -2139,6 +2152,57 @@ export const api = {
     request<{ success: boolean }>(`/printers/${printerId}/slot-presets/${amsId}/${trayId}`, {
       method: 'DELETE',
     }),
+  configureAmsSlot: (
+    printerId: number,
+    amsId: number,
+    trayId: number,
+    config: {
+      tray_info_idx: string;
+      tray_type: string;
+      tray_sub_brands: string;
+      tray_color: string;
+      nozzle_temp_min: number;
+      nozzle_temp_max: number;
+      cali_idx: number;
+      nozzle_diameter: string;
+      setting_id?: string;
+      kprofile_filament_id?: string;
+      kprofile_setting_id?: string;
+      k_value?: number;
+    }
+  ) => {
+    const params = new URLSearchParams({
+      tray_info_idx: config.tray_info_idx,
+      tray_type: config.tray_type,
+      tray_sub_brands: config.tray_sub_brands,
+      tray_color: config.tray_color,
+      nozzle_temp_min: config.nozzle_temp_min.toString(),
+      nozzle_temp_max: config.nozzle_temp_max.toString(),
+      cali_idx: config.cali_idx.toString(),
+      nozzle_diameter: config.nozzle_diameter,
+    });
+    if (config.setting_id) {
+      params.set('setting_id', config.setting_id);
+    }
+    if (config.kprofile_filament_id) {
+      params.set('kprofile_filament_id', config.kprofile_filament_id);
+    }
+    if (config.kprofile_setting_id) {
+      params.set('kprofile_setting_id', config.kprofile_setting_id);
+    }
+    if (config.k_value !== undefined && config.k_value > 0) {
+      params.set('k_value', config.k_value.toString());
+    }
+    return request<{ success: boolean; message: string }>(
+      `/printers/${printerId}/slots/${amsId}/${trayId}/configure?${params}`,
+      { method: 'POST' }
+    );
+  },
+  resetAmsSlot: (printerId: number, amsId: number, trayId: number) =>
+    request<{ success: boolean; message: string }>(
+      `/printers/${printerId}/ams/${amsId}/tray/${trayId}/reset`,
+      { method: 'POST' }
+    ),
 
   // Filaments
   listFilaments: () => request<Filament[]>('/filaments/'),
@@ -2539,6 +2603,61 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ file_ids: fileIds }),
     }),
+  printLibraryFile: (
+    fileId: number,
+    printerId: number,
+    options?: {
+      plate_id?: number;
+      ams_mapping?: number[];
+      bed_levelling?: boolean;
+      flow_cali?: boolean;
+      vibration_cali?: boolean;
+      layer_inspect?: boolean;
+      timelapse?: boolean;
+      use_ams?: boolean;
+    }
+  ) =>
+    request<{ status: string; printer_id: number; archive_id: number; filename: string }>(
+      `/library/files/${fileId}/print?printer_id=${printerId}`,
+      {
+        method: 'POST',
+        body: options ? JSON.stringify(options) : undefined,
+      }
+    ),
+  getLibraryFilePlates: (fileId: number) =>
+    request<{
+      file_id: number;
+      filename: string;
+      plates: Array<{
+        index: number;
+        name: string | null;
+        objects: string[];
+        has_thumbnail: boolean;
+        thumbnail_url: string | null;
+        print_time_seconds: number | null;
+        filament_used_grams: number | null;
+        filaments: Array<{
+          slot_id: number;
+          type: string;
+          color: string;
+          used_grams: number;
+          used_meters: number;
+        }>;
+      }>;
+      is_multi_plate: boolean;
+    }>(`/library/files/${fileId}/plates`),
+  getLibraryFileFilamentRequirements: (fileId: number, plateId?: number) =>
+    request<{
+      file_id: number;
+      filename: string;
+      filaments: Array<{
+        slot_id: number;
+        type: string;
+        color: string;
+        used_grams: number;
+        used_meters: number;
+      }>;
+    }>(`/library/files/${fileId}/filament-requirements${plateId !== undefined ? `?plate_id=${plateId}` : ''}`),
 };
 
 // AMS History types
@@ -2718,6 +2837,7 @@ export interface LibraryFileListItem {
 }
 
 export interface LibraryFileUpdate {
+  filename?: string;
   folder_id?: number | null;
   project_id?: number | null;
   notes?: string | null;
@@ -2962,6 +3082,19 @@ export interface DebugLoggingState {
   duration_seconds: number | null;
 }
 
+export interface LogEntry {
+  timestamp: string;
+  level: string;
+  logger_name: string;
+  message: string;
+}
+
+export interface LogsResponse {
+  entries: LogEntry[];
+  total_in_file: number;
+  filtered_count: number;
+}
+
 // Support API
 export const supportApi = {
   getDebugLoggingState: () =>
@@ -2995,4 +3128,16 @@ export const supportApi = {
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
   },
+
+  getLogs: (params?: { limit?: number; level?: string; search?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.level) searchParams.set('level', params.level);
+    if (params?.search) searchParams.set('search', params.search);
+    const query = searchParams.toString();
+    return request<LogsResponse>(`/support/logs${query ? `?${query}` : ''}`);
+  },
+
+  clearLogs: () =>
+    request<{ message: string }>('/support/logs', { method: 'DELETE' }),
 };

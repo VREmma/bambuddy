@@ -48,8 +48,7 @@ import type { PrintQueueItem } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { EditQueueItemModal } from '../components/EditQueueItemModal';
-import { AddToQueueModal } from '../components/AddToQueueModal';
+import { PrintModal } from '../components/PrintModal';
 import { useToast } from '../contexts/ToastContext';
 
 function formatDuration(seconds: number | null | undefined): string {
@@ -168,7 +167,13 @@ function SortableQueueItem({
         <div className="w-14 h-14 flex-shrink-0 bg-bambu-dark rounded-lg overflow-hidden">
           {item.archive_thumbnail ? (
             <img
-              src={api.getArchiveThumbnail(item.archive_id)}
+              src={api.getArchiveThumbnail(item.archive_id!)}
+              alt=""
+              className="w-full h-full object-cover"
+            />
+          ) : item.library_file_thumbnail ? (
+            <img
+              src={api.getLibraryFileThumbnailUrl(item.library_file_id!)}
               alt=""
               className="w-full h-full object-cover"
             />
@@ -183,15 +188,25 @@ function SortableQueueItem({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <p className="text-white font-medium truncate">
-              {item.archive_name || `Archive #${item.archive_id}`}
+              {item.archive_name || item.library_file_name || `File #${item.archive_id || item.library_file_id}`}
             </p>
-            <Link
-              to={`/archives?highlight=${item.archive_id}`}
-              className="text-bambu-gray hover:text-bambu-green transition-colors flex-shrink-0"
-              title="View archive"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-            </Link>
+            {item.archive_id ? (
+              <Link
+                to={`/archives?highlight=${item.archive_id}`}
+                className="text-bambu-gray hover:text-bambu-green transition-colors flex-shrink-0"
+                title="View archive"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Link>
+            ) : item.library_file_id ? (
+              <Link
+                to={`/library?highlight=${item.library_file_id}`}
+                className="text-bambu-gray hover:text-bambu-green transition-colors flex-shrink-0"
+                title="View in File Manager"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Link>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-3 text-sm text-bambu-gray">
@@ -473,7 +488,9 @@ export function QueuePage() {
     return [...items].sort((a, b) => {
       let cmp: number;
       if (pendingSortBy === 'name') {
-        cmp = (a.archive_name || '').localeCompare(b.archive_name || '');
+        const aName = a.archive_name || a.library_file_name || '';
+        const bName = b.archive_name || b.library_file_name || '';
+        cmp = aName.localeCompare(bName);
       } else if (pendingSortBy === 'printer') {
         cmp = (a.printer_name || '').localeCompare(b.printer_name || '');
       } else if (pendingSortBy === 'time') {
@@ -491,7 +508,9 @@ export function QueuePage() {
     return [...items].sort((a, b) => {
       let cmp: number;
       if (historySortBy === 'name') {
-        cmp = (a.archive_name || '').localeCompare(b.archive_name || '');
+        const aName = a.archive_name || a.library_file_name || '';
+        const bName = b.archive_name || b.library_file_name || '';
+        cmp = aName.localeCompare(bName);
       } else if (historySortBy === 'printer') {
         cmp = (a.printer_name || '').localeCompare(b.printer_name || '');
       } else {
@@ -802,17 +821,23 @@ export function QueuePage() {
 
       {/* Edit Modal */}
       {editItem && (
-        <EditQueueItemModal
-          item={editItem}
+        <PrintModal
+          mode="edit-queue-item"
+          archiveId={editItem.archive_id ?? undefined}
+          libraryFileId={editItem.library_file_id ?? undefined}
+          archiveName={editItem.archive_name || editItem.library_file_name || `File #${editItem.archive_id || editItem.library_file_id}`}
+          queueItem={editItem}
           onClose={() => setEditItem(null)}
         />
       )}
 
       {/* Re-queue Modal */}
       {requeueItem && (
-        <AddToQueueModal
-          archiveId={requeueItem.archive_id}
-          archiveName={requeueItem.archive_name || `Archive #${requeueItem.archive_id}`}
+        <PrintModal
+          mode="add-to-queue"
+          archiveId={requeueItem.archive_id ?? undefined}
+          libraryFileId={requeueItem.library_file_id ?? undefined}
+          archiveName={requeueItem.archive_name || requeueItem.library_file_name || `File #${requeueItem.archive_id || requeueItem.library_file_id}`}
           onClose={() => setRequeueItem(null)}
         />
       )}
@@ -827,10 +852,10 @@ export function QueuePage() {
           }
           message={
             confirmAction.type === 'cancel'
-              ? `Are you sure you want to cancel "${confirmAction.item.archive_name || 'this print'}"?`
+              ? `Are you sure you want to cancel "${confirmAction.item.archive_name || confirmAction.item.library_file_name || 'this print'}"?`
               : confirmAction.type === 'stop'
-              ? `Are you sure you want to stop the current print "${confirmAction.item.archive_name || 'this print'}"? This will cancel the print job on the printer.`
-              : `Are you sure you want to remove "${confirmAction.item.archive_name || 'this item'}" from the queue history?`
+              ? `Are you sure you want to stop the current print "${confirmAction.item.archive_name || confirmAction.item.library_file_name || 'this print'}"? This will cancel the print job on the printer.`
+              : `Are you sure you want to remove "${confirmAction.item.archive_name || confirmAction.item.library_file_name || 'this item'}" from the queue history?`
           }
           confirmText={
             confirmAction.type === 'cancel' ? 'Cancel Print' :

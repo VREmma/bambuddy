@@ -206,6 +206,37 @@ class TestLibraryFilesAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_rename_file(self, async_client: AsyncClient, file_factory, db_session):
+        """Verify file can be renamed."""
+        lib_file = await file_factory(filename="old_name.3mf")
+        data = {"filename": "new_name.3mf"}
+        response = await async_client.put(f"/api/v1/library/files/{lib_file.id}", json=data)
+        assert response.status_code == 200
+        result = response.json()
+        assert result["filename"] == "new_name.3mf"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_rename_file_invalid_path_separator(self, async_client: AsyncClient, file_factory, db_session):
+        """Verify file rename fails with path separators."""
+        lib_file = await file_factory(filename="test.3mf")
+        data = {"filename": "path/to/file.3mf"}
+        response = await async_client.put(f"/api/v1/library/files/{lib_file.id}", json=data)
+        assert response.status_code == 400
+        assert "path separator" in response.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_rename_file_invalid_backslash(self, async_client: AsyncClient, file_factory, db_session):
+        """Verify file rename fails with backslash."""
+        lib_file = await file_factory(filename="test.3mf")
+        data = {"filename": "path\\to\\file.3mf"}
+        response = await async_client.put(f"/api/v1/library/files/{lib_file.id}", json=data)
+        assert response.status_code == 400
+        assert "path separator" in response.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_library_stats(self, async_client: AsyncClient, folder_factory, file_factory, db_session):
         """Verify library stats endpoint returns counts."""
         await folder_factory()

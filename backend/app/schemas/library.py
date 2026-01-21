@@ -80,6 +80,7 @@ class FileCreate(BaseModel):
 class FileUpdate(BaseModel):
     """Schema for updating a file."""
 
+    filename: str | None = Field(None, min_length=1, max_length=255)
     folder_id: int | None = None
     project_id: int | None = None
     notes: str | None = None
@@ -159,9 +160,10 @@ class FileMoveRequest(BaseModel):
 
 
 class FilePrintRequest(BaseModel):
-    """Schema for printing a file from the library."""
+    """Schema for printing a file from the library.
 
-    printer_id: str  # Printer serial number
+    Note: printer_id is passed as a query parameter, not in the body.
+    """
 
     # Print options (same as archive reprint)
     plate_id: int | None = None
@@ -218,7 +220,6 @@ class AddToQueueResult(BaseModel):
     file_id: int
     filename: str
     queue_item_id: int
-    archive_id: int
 
 
 class AddToQueueError(BaseModel):

@@ -56,12 +56,13 @@
 
 ### 📊 Monitoring & Control
 - Real-time printer status via WebSocket
-- Live camera streaming (MJPEG) & snapshots
+- Live camera streaming (MJPEG) & snapshots with multi-viewer support
 - Fan status monitoring (part cooling, auxiliary, chamber)
 - Printer control (stop, pause, resume, chamber light)
 - Resizable printer cards (S/M/L/XL)
 - Skip objects during print
 - AMS slot RFID re-read
+- AMS slot configuration (custom presets, K profiles, color picker)
 - HMS error monitoring with history
 - Print success rates & trends
 - Filament usage tracking
@@ -70,12 +71,24 @@
 
 ### ⏰ Scheduling & Automation
 - Print queue with drag-and-drop
+- Multi-printer selection (send to multiple printers at once)
+- Per-printer AMS mapping (individual slot configuration for print farms)
 - Scheduled prints (date/time)
 - Queue Only mode (stage without auto-start)
 - Smart plug integration (Tasmota, Home Assistant)
 - Energy consumption tracking
 - Auto power-on before print
 - Auto power-off after cooldown
+
+### 📁 File Manager (Library)
+- Upload and organize sliced files (3MF, gcode)
+- Folder structure with drag-and-drop
+- Rename files and folders via context menu
+- Print directly to any printer with full options
+- Add to queue without creating archive upfront
+- Plate selection for multi-plate 3MF files
+- Duplicate detection via file hash
+- Mobile-friendly with always-visible action buttons
 
 ### 📁 Projects
 - Group related prints (e.g., "Voron Build")
@@ -118,6 +131,7 @@
 - File manager for printer storage
 - Firmware update helper (LAN-only printers)
 - Debug logging toggle with live indicator
+- Live application log viewer with filtering
 - Support bundle generator (privacy-filtered)
 
 </td>
@@ -288,6 +302,8 @@ Open **http://localhost:8000** in your browser.
 
 > **macOS/Windows users:** Docker Desktop doesn't support `network_mode: host`. Edit docker-compose.yml: comment out `network_mode: host` and uncomment the `ports:` section. Printer discovery won't work - add printers manually by IP.
 
+> **Linux users:** If you get "permission denied" errors, either prefix commands with `sudo` (e.g., `sudo docker compose up -d`) or [add your user to the docker group](https://docs.docker.com/engine/install/linux-postinstall/).
+
 <details>
 <summary><strong>Docker Configuration & Commands</strong></summary>
 
@@ -296,6 +312,7 @@ Open **http://localhost:8000** in your browser.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TZ` | `UTC` | Your timezone (e.g., `America/New_York`, `Europe/Berlin`) |
+| `PORT` | `8000` | Port BamBuddy runs on (with host networking mode) |
 | `DEBUG` | `false` | Enable debug logging |
 | `LOG_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 

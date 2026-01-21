@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { api, supportApi } from '../api/client';
 import { Card } from '../components/Card';
+import { LogViewer } from '../components/LogViewer';
 import { formatDateTime, type TimeFormat } from '../utils/date';
 
 function formatBytes(bytes: number): string {
@@ -341,6 +342,9 @@ export function SystemInfoPage() {
               {t('support.privacyNote', 'IP addresses in logs are replaced with [IP] and email addresses with [EMAIL].')}
             </p>
           </div>
+
+          {/* Log Viewer */}
+          <LogViewer />
         </div>
       </Section>
 

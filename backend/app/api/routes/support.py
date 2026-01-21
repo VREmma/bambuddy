@@ -5,10 +5,11 @@ import json
 import logging
 import os
 import platform
+import re
 import zipfile
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -149,9 +150,161 @@ async def toggle_debug_logging(toggle: DebugLoggingToggle):
     )
 
 
+class LogEntry(BaseModel):
+    """A single log entry."""
+
+    timestamp: str
+    level: str
+    logger_name: str
+    message: str
+
+
+class LogsResponse(BaseModel):
+    """Response containing log entries."""
+
+    entries: list[LogEntry]
+    total_in_file: int
+    filtered_count: int
+
+
+# Log line regex pattern: "2024-01-15 10:30:45,123 INFO [module.name] Message here"
+LOG_LINE_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3})\s+(\w+)\s+\[([^\]]+)\]\s+(.*)$")
+
+
+def _parse_log_line(line: str) -> LogEntry | None:
+    """Parse a single log line into a LogEntry."""
+    match = LOG_LINE_PATTERN.match(line.strip())
+    if match:
+        return LogEntry(
+            timestamp=match.group(1),
+            level=match.group(2),
+            logger_name=match.group(3),
+            message=match.group(4),
+        )
+    return None
+
+
+def _read_log_entries(
+    limit: int = 200,
+    level_filter: str | None = None,
+    search: str | None = None,
+) -> tuple[list[LogEntry], int]:
+    """Read and parse log entries from file with optional filtering."""
+    log_file = settings.log_dir / "bambuddy.log"
+    if not log_file.exists():
+        return [], 0
+
+    entries: list[LogEntry] = []
+    total_lines = 0
+
+    try:
+        with open(log_file, encoding="utf-8", errors="replace") as f:
+            # Read all lines and process
+            lines = f.readlines()
+            total_lines = len(lines)
+
+            # Parse lines in reverse order (newest first)
+            current_entry: LogEntry | None = None
+            multi_line_buffer: list[str] = []
+
+            for line in reversed(lines):
+                parsed = _parse_log_line(line)
+                if parsed:
+                    # Found a new log entry start
+                    if current_entry:
+                        # Apply filters and add previous entry (without multi_line_buffer - it belongs to new entry)
+                        should_include = True
+
+                        # Level filter
+                        if level_filter and current_entry.level.upper() != level_filter.upper():
+                            should_include = False
+
+                        # Search filter (case-insensitive)
+                        if search and should_include:
+                            search_lower = search.lower()
+                            if not (
+                                search_lower in current_entry.message.lower()
+                                or search_lower in current_entry.logger_name.lower()
+                            ):
+                                should_include = False
+
+                        if should_include:
+                            entries.append(current_entry)
+
+                            if len(entries) >= limit:
+                                break
+
+                    # Set new entry and attach any accumulated multi-line content to it
+                    # (in reverse order, continuation lines come before their parent entry)
+                    current_entry = parsed
+                    if multi_line_buffer:
+                        current_entry.message += "\n" + "\n".join(reversed(multi_line_buffer))
+                    multi_line_buffer = []
+                elif line.strip():
+                    # Continuation of multi-line log entry (will be attached to next parsed entry)
+                    multi_line_buffer.append(line.rstrip())
+
+            # Don't forget the last (oldest) entry
+            # Note: any remaining multi_line_buffer would be orphaned lines before the first entry
+            if current_entry and len(entries) < limit:
+                should_include = True
+                if level_filter and current_entry.level.upper() != level_filter.upper():
+                    should_include = False
+                if search and should_include:
+                    search_lower = search.lower()
+                    if not (
+                        search_lower in current_entry.message.lower()
+                        or search_lower in current_entry.logger_name.lower()
+                    ):
+                        should_include = False
+                if should_include:
+                    entries.append(current_entry)
+
+    except Exception as e:
+        logger.error(f"Error reading log file: {e}")
+        return [], 0
+
+    # Entries are already in newest-first order
+    return entries, total_lines
+
+
+@router.get("/logs", response_model=LogsResponse)
+async def get_logs(
+    limit: int = Query(200, ge=1, le=1000, description="Maximum number of entries to return"),
+    level: str | None = Query(None, description="Filter by log level (DEBUG, INFO, WARNING, ERROR)"),
+    search: str | None = Query(None, description="Search in message or logger name"),
+):
+    """Get recent application log entries with optional filtering."""
+    entries, total_lines = _read_log_entries(limit=limit, level_filter=level, search=search)
+
+    return LogsResponse(
+        entries=entries,
+        total_in_file=total_lines,
+        filtered_count=len(entries),
+    )
+
+
+@router.delete("/logs")
+async def clear_logs():
+    """Clear the application log file."""
+    log_file = settings.log_dir / "bambuddy.log"
+
+    if log_file.exists():
+        try:
+            # Truncate the file instead of deleting (keeps file handles valid)
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.write("")
+            logger.info("Log file cleared by user")
+            return {"message": "Logs cleared successfully"}
+        except Exception as e:
+            logger.error(f"Error clearing log file: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to clear logs: {e}")
+
+    return {"message": "Log file does not exist"}
+
+
 def _sanitize_path(path: str) -> str:
     """Remove username from paths for privacy."""
-    import re
 
     # Replace /home/username/ or /Users/username/ with /home/[user]/
     path = re.sub(r"/home/[^/]+/", "/home/[user]/", path)

@@ -571,6 +571,8 @@ def printer_state_to_dict(state: PrinterState, printer_id: int | None = None, mo
         "heatbreak_fan_speed": state.heatbreak_fan_speed,
         # Chamber light state
         "chamber_light": state.chamber_light,
+        # Active extruder for dual-nozzle printers (0=right, 1=left)
+        "active_extruder": state.active_extruder,
     }
     # Add cover URL if there's an active print and printer_id is provided
     # Include PAUSE/PAUSED states so skip objects modal can show cover
